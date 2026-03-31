@@ -1,0 +1,1048 @@
+---
+title: "Data Visualization - Cell Density & Volume"
+author: "Ellie Ryan"
+date: "`r Sys.Date()`"
+output:
+   html_document:
+    theme: flatly
+    highlight: zenburn
+    toc: true
+    toc_float: true
+    toc_collapsed: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Created:** 9/16/2025
+
+**Last Modified:** 1/23/2026
+
+```{r, message=FALSE, warning=FALSE}
+# Load packages
+library(tidyverse)
+library(lubridate)
+library(stringr)
+library(kableExtra)
+library(scales)
+library(GGally)
+library(patchwork)
+library(Hmisc)
+library(reshape2)
+library(car)
+library(purrr)
+library(tibble)
+library(FSA) 
+```
+
+```{r}
+colorPal <- c(
+  "clean" = "#769a9c",
+  "red" = "#933410",
+  "green" = "#326e35"
+)
+
+algaePal<- c(
+  "clean" = "#a5bdc0",
+  "algae" = "#735a69"
+)
+
+plot_theme <- theme(
+  axis.title = element_text(size = 12, face = "bold"), # Axis labels: 12 pt, bold
+  axis.text = element_text(size = 12), # Axis text: 12 pt
+  axis.line = element_line(linewidth = 0.5),  # Thicker axis line
+  legend.position = "top", # Position legend at the top
+  legend.justification = c(0, 1), # Justify legend to top-left
+  legend.text = element_text(size = 12), # Legend text: 12 pt
+  legend.title = element_text(size = 12), 
+  plot.title = element_text(size = 14, face = "bold"),  # Adjust plot title size
+  plot.subtitle = element_text(size = 13, face = "italic"), 
+  plot.margin = margin(20, 20, 20, 20)
+)
+
+plot_themePub <- theme(
+  text = element_text(family = "Helvetica"),
+  axis.title.x = element_text(size = 10, margin = margin(t = 10)),  # t = top margin
+  axis.title.y = element_text(size = 10, margin = margin(r = 10)),  # r = right margin
+  axis.text = element_text(size = 10),
+  axis.line.x = element_line(color = "black", linewidth = 0.5),
+  axis.line.y = element_line(color = "black", linewidth = 0.5),,
+  axis.ticks.x = element_line(color = "black", linewidth = 0.25),
+  axis.ticks.y = element_line(color = "black", linewidth = 0.25),  # Add tick marks
+  axis.ticks.length = unit(-0.15, "cm"),  # Length of tick marks
+  panel.grid = element_blank(),
+  panel.background = element_blank(),
+  panel.border = element_blank(),
+  legend.position = "top",
+  legend.justification = c(0, 1),
+  legend.text = element_text(size = 10),
+  legend.title = element_text(size = 10),
+  plot.title = element_text(size = 14, face = "bold"),
+  plot.subtitle = element_text(size = 13, face = "italic"),
+  plot.margin = margin(10, 10, 10, 10)
+)
+
+plot_theme2 <- theme(
+  axis.title = element_text(size = 12, face = "bold"), # Axis labels: 12 pt, bold
+  axis.text = element_text(size = 12), # Axis text: 12 pt
+  axis.line = element_line(linewidth = 0.5),  # Thicker axis line
+  legend.position = "top", # Position legend at the top
+  legend.justification = c(0, 1), # Justify legend to top-left
+  legend.text = element_text(size = 12), # Legend text: 12 pt
+  legend.title = element_text(size = 12), 
+  plot.title = element_text(size = 14, face = "bold"),  # Adjust plot title size
+  plot.subtitle = element_text(size = 13, face = "italic"), 
+  axis.text.x = element_text(angle = 45, hjust = 1), 
+  plot.margin = margin(20, 20, 20, 20)
+)
+
+pairsplot_theme <- theme(
+  text = element_text(size = 10),  # Adjust variable name text size
+  axis.text = element_text(size = 8),  # Adjust axis text size
+  plot.title = element_text(size = 12, face = "bold"),  # Adjust plot title size
+  legend.text = element_text(size = 12))  # Adjust legend text size
+```
+
+# Overview
+
+This is the updated document for cell density/volume analysis, following addition of the Petermann Island samples. This doc focuses specifically on cell density and cell volume, and does not consider cell biovolume or cell length for simplicity. The purpose of this `.Rmd` is to visualize cell density and volume by site and color, and obtain basic summary statistics associated with cell density in order to inform my next steps in analysis. Before proceeding, I will clean the dataset so that it features only the variables I am interested in for this specific analysis. In this dataset, 108 samples are used from the Antarctic Peninsula, following the removal of 6 outliers. These observations are broken down by `Color`, or the apparent snow color at time of sample collection. To keep things simple, there are only three levels to the `Color` category: red, green and clean. The breakdown of samples collected in the WAP is as follows: 
+
+-   Antarctic Peninsula:
+    -   108 samples
+        -   43 red
+        -   47 green
+        -   18 clean
+        
+*NOTE: Fewer samples were used for analysis, since there are NA values for cell density/cell volumes for some samples.*
+        
+From outlier analysis conducted using figures generated in the first run-through of this script, the following outliers were identified for removal:
+
+-   2025-02-19-SI-algae3 (green)
+-   2025-02-24-DA-algae2 (red)
+-   2025-02-24-DA-algae6 (green)
+-   2025-03-07-NH-algae3 (clean)
+-   2025-01-12-PI-algae10 (red)
+
+See the Thesis Figures (Preliminary) doc for justification for removal of each.
+
+## Data Wrangling
+
+```{r}
+df <- read.csv("CompiledDataPI.csv")
+str(df)
+```
+
+```{r}
+# Format date column 
+df <- df %>%
+  mutate(
+    Date = as.Date(Date, format = "%m/%d/%y"))
+```
+
+```{r}
+str(df)
+```
+
+
+```{r}
+outliers <- c(
+  "2025-02-19-SI-algae3",
+  "2025-02-24-DA-algae2",
+  "2025-02-24-DA-algae6",
+  "2025-03-07-NH-algae3",
+  "2025-01-12-PI-algae10")
+
+df <- df %>% 
+  filter(!SampleID %in% outliers)
+```
+
+### Cell Density Dataframe
+I will keep the following variables in the `dfC` for this analysis:
+
+-   `SampleID`
+-   `Date`
+-   `Location`
+-   `Site`
+-   `Color`
+-   `CellDensity`
+
+```{r}
+dfC <- df %>% 
+  select(c("SampleID", "Date", "Location", "Site", "Color", "CellDensity" )) %>% 
+  na.omit(dfC) %>% 
+  mutate(Algae = case_when(
+    Color %in% c("red", "green") ~ "algae",
+    Color == "clean" ~ 'clean'
+  )) %>% 
+  relocate(Algae, .after = Color) %>% 
+  mutate(Region = case_when(
+    Site %in% c("Horseshoe Island", "Stonington Island") ~ "South", 
+    TRUE ~ "North")) %>% 
+  relocate(Region, .after = Site)
+
+head(dfC)
+```
+
+### Cell Volume Dataframe
+I will make a separate dataframe that calculates cell volume from the `CellLength` variable, since this variable has some NA values for samples with low cell density. There are 264 observations in the `dfC` dataframe with only `CellDensity` and 254 observations in the `dfCL` dataframe with both `CellDensity` and `CellLength` variables. I will remove rows where cell length was set to zero for non-zero counts (lengths were not measured for some low density counts). I am also going to add a new categorical variable, `Algae`, which generalizes the `Color` category by grouping red and green snow samples together as `algae` and clean samples as `clean`. 
+
+Lastly, I will add a `CellVolume` variable. It is calculated as described below: 
+
+**Biovolume:** This represents the volume of each cell, assuming a spherical shape for snow algae (µm^3^ or mm^3^). This method was first categorized by Hillebrand et al., 1999, *Biovolume Calculation for Pelagic and Benthic Microalgae*. The equation is as follows:
+
+-   V~bio~ = 4/3πr^3^
+
+Volume is in units of µm^3^.
+
+```{r}
+#Filter dataset and add algae variable
+dfCL <- df %>% 
+  select(c("SampleID", "Date", "Location", "Site", "Color", "CellDensity", "CellLength" )) %>% 
+  na.omit(dfCL) %>% 
+  mutate(Algae = case_when(
+    Color %in% c("red", "green") ~ "algae",
+    Color == "clean" ~ 'clean'
+  ))  %>% 
+  relocate(Algae, .after = Color) %>% 
+  mutate(Region = case_when(
+    Site %in% c("Horseshoe Island", "Stonington Island") ~ "South", 
+    TRUE ~ "North")) %>% 
+  relocate(Region, .after = Site)
+
+# Add volume variable
+dfCL <- dfCL  %>% 
+  mutate(
+    # Calulate Volume (µm^3)
+    Volume = (pi/6)*(CellLength^3)) %>% 
+  relocate(Volume, .after = CellLength)
+
+# Remove samples with zero values for cell length and nonzero values for cell density
+dfCL <- dfCL %>% 
+  filter(!(CellDensity > 0 & CellLength == 0))
+  
+```
+
+### Cell Density & Anions Dataframe
+
+I'll also make a dataframe with cell density and anion concentrations so I can assess this relationship using a pairs plot later on. I am going to combine NO2 and NO3 by summing them, to create a new variable, NO2NO3.
+
+```{r}
+dfCAnion <- df %>% 
+  select(c("SampleID", "Date", "Location", "Site", "Color", CellDensity, Fo:SO42)) %>% 
+  na.omit() %>% 
+  mutate(Algae = case_when(
+    Color %in% c("red", "green") ~ "algae",
+    Color == "clean" ~ "clean"
+  )) %>% 
+  mutate(NO2NO3 = NO2 + NO3) %>% 
+  relocate(Algae, .after = Color) %>% 
+  select(-NO2, -NO3) %>% 
+  mutate(Region = case_when(
+    Site %in% c("Horseshoe Island", "Stonington Island") ~ "South", 
+    TRUE ~ "North")) %>% 
+  relocate(Region, .after = Site)
+```
+
+```{r}
+dfCAnion_long <- dfCAnion %>% 
+  pivot_longer(cols = Fo:NO2NO3,
+               names_to = "Anion", 
+               values_to = "Concentration")
+```
+
+### Cell Volume & Anions Dataframe
+And I'll also make a dataframe with cell volume and anion concentrations.
+
+```{r}
+
+#Filter dataset and add algae variable
+dfCLAnion <- df %>% 
+  select(c("SampleID", "Date", "Location", "Site", "Color", "CellDensity", "CellLength",Fo:SO42)) %>% 
+  na.omit(dfCLAnion) %>% 
+  mutate(Algae = case_when(
+    Color %in% c("red", "green") ~ "algae",
+    Color == "clean" ~ 'clean'
+  )) %>% 
+  mutate(Region = case_when(
+    Site %in% c("Horseshoe Island", "Stonington Island") ~ "South", 
+    TRUE ~ "North")) %>% 
+  relocate(Region, .after = Site)
+
+# Add volume variable
+dfCLAnion <- dfCLAnion  %>% 
+  mutate(
+    # Calulate Volume (µm^3)
+    Volume = (pi/6)*(CellLength^3)) %>% 
+  relocate(Volume, .after = CellLength)
+
+# Remove samples with zero values for cell length and nonzero values for cell density
+dfCLAnion <- dfCLAnion %>% 
+  filter(!(CellDensity > 0 & CellLength == 0))
+
+#Combine NO2 & NO3
+dfCLAnion <- dfCLAnion %>% 
+  mutate(NO2NO3 = NO2 + NO3) %>% 
+  relocate(Algae, .after = Color) %>% 
+  select(-NO2, -NO3)
+```
+
+```{r}
+dfCLAnion_long <- dfCLAnion %>% 
+  pivot_longer(cols = Fo:NO2NO3,
+               names_to = "Anion", 
+               values_to = "Concentration")
+```
+
+# Summary Statistics {.tabset}
+
+## Cell Density (Site & Color)
+
+Below is a summary stats table for cell density, grouped by `Color`. The `all` level of the `Color` classification includes red, green and clean snow observations.
+
+```{r}
+# Cell Density summary
+dfCSummary <- dfC %>% 
+  group_by(Color) %>% 
+  summarise(
+    n = n(),
+    mean = comma(round(mean(CellDensity, na.rm = TRUE), 2)),
+    median = comma(round(median(CellDensity, na.rm = TRUE), 2)),
+    max = comma(round(max(CellDensity, na.rm = TRUE), 2)),
+    min = comma(round(min(CellDensity, na.rm = TRUE), 2)),
+    sd = comma(round(sd(CellDensity, na.rm = TRUE), 2)),
+    .groups = "drop"
+  )
+
+# Add "all" for each site
+dfCSummaryAll <- dfC %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    mean = comma(round(mean(CellDensity, na.rm = TRUE), 2)),
+    median = comma(round(median(CellDensity, na.rm = TRUE), 2)),
+    max = comma(round(max(CellDensity, na.rm = TRUE), 2)),
+    min = comma(round(min(CellDensity, na.rm = TRUE), 2)),
+    sd = comma(round(sd(CellDensity, na.rm = TRUE), 2)),
+    .groups = "drop"
+  )
+
+# Filter Antarctic red + green
+dfCSummaryAPRG <- dfC %>%
+  filter(Color %in% c("red", "green")) %>%
+  summarise(
+    Color = "red+green",
+    n = n(),
+    mean = comma(round(mean(CellDensity, na.rm = TRUE), 2)),
+    median = comma(round(median(CellDensity, na.rm = TRUE), 2)),
+    max = comma(round(max(CellDensity, na.rm = TRUE), 2)),
+    min = comma(round(min(CellDensity, na.rm = TRUE), 2)),
+    sd = comma(round(sd(CellDensity, na.rm = TRUE), 2))
+  )
+
+# Combine and order rows
+dfCSummary <- bind_rows(dfCSummaryAll, dfCSummary, dfCSummaryAPRG) %>% 
+  arrange(match(Color, c("green", "red", "red+green", "clean", "all")))
+
+# Format table with kableExtra
+dfCSummary %>% 
+  kable("html", caption = "Summary Statistics for cell density (cells/mL) by Snow Color", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+
+## Cell Volume (Site and Color)
+
+```{r}
+# Cell Volume 
+dfCLSummary <- dfCL %>% 
+  group_by(Color) %>% 
+  summarise(
+    n = n(),
+    mean = comma(round(mean(Volume, na.rm = TRUE), 2)),
+    median = comma(round(median(Volume, na.rm = TRUE), 2)),
+    max = comma(round(max(Volume, na.rm = TRUE), 2)),
+    min = comma(round(min(Volume, na.rm = TRUE), 2)),
+    sd = comma(round(sd(Volume, na.rm = TRUE), 2)),
+    .groups = "drop")
+
+# Add "All" for each site 
+dfCLSummaryAll <- dfCL %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    mean = comma(round(mean(Volume, na.rm = TRUE), 2)),
+    median = comma(round(median(Volume, na.rm = TRUE), 2)),
+    max = comma(round(max(Volume, na.rm = TRUE), 2)),
+    min = comma(round(min(Volume, na.rm = TRUE), 2)),
+    sd = comma(round(sd(Volume, na.rm = TRUE), 2)),
+    .groups = "drop"
+  )
+
+# Filter Antarctic red + green
+dfCLSummaryAPRG <- dfCL %>%
+  filter(Color %in% c("red", "green")) %>%
+  summarise(
+    Color = "red+green",
+    n = n(),
+    mean = comma(round(mean(Volume, na.rm = TRUE), 2)),
+    median = comma(round(median(Volume, na.rm = TRUE), 2)),
+    max = comma(round(max(Volume, na.rm = TRUE), 2)),
+    min = comma(round(min(Volume, na.rm = TRUE), 2)),
+    sd = comma(round(sd(Volume, na.rm = TRUE), 2)),
+    .groups = "drop")
+
+# Combine and order rows
+dfCLSummary <- bind_rows(dfCLSummaryAll, dfCLSummary, dfCLSummaryAPRG) %>% 
+  arrange(match(Color, c("green", "red", "red+green", "clean", "all")))
+
+# Format table with kableExtra
+dfCLSummary %>% 
+  kable("html", caption = "Summary Statistics for cell density (µm^3) by Snow Color", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+# ANOVA/Kruskal Wallis Test
+Before proceeding with an ANOVA test to assess differences in cell density/volume between colors, I am going to check to see if these variables follow the assumptions of normality and equal variance required to run an ANOVA. Cell density is below: 
+```{r}
+# Put your variables of interest into a vector
+vars <- c("CellDensity")
+
+# Loop over each variable
+anovaAssumptionsResultsC <- map_dfr(vars, function(var) {
+  
+  # Fit ANOVA model
+  formula <- as.formula(paste(var, "~ Color"))
+  aov_model <- aov(formula, data = dfC) 
+  
+  # Extract assumption test results
+  shapiro_p <- shapiro.test(residuals(aov_model))$p.value
+  levene_p  <- leveneTest(formula, data = dfC)$`Pr(>F)`[1]
+  
+  tibble(
+    Variable = var,
+    shapiro_p = shapiro_p,
+    levene_p = levene_p
+  )
+})
+
+anovaAssumptionsResultsC
+```
+
+Cell volume is below:
+```{r}
+# Put your variables of interest into a vector
+vars <- c("Volume")
+
+# Loop over each variable
+anovaAssumptionsResultsCL <- map_dfr(vars, function(var) {
+  
+  # Fit ANOVA model
+  formula <- as.formula(paste(var, "~ Color"))
+  aov_model <- aov(formula, data = dfCL) 
+  
+  # Extract assumption test results
+  shapiro_p <- shapiro.test(residuals(aov_model))$p.value
+  levene_p  <- leveneTest(formula, data = dfCL)$`Pr(>F)`[1]
+  
+  tibble(
+    Variable = var,
+    shapiro_p = shapiro_p,
+    levene_p = levene_p
+  )
+})
+
+anovaAssumptionsResultsCL
+```
+
+Neither meets assumptions of both normality and homogeneity of variance. Because of this, I am going to proceed with a Kruskal-Wallis test in lieu of an ANOVA. 
+
+## Kruskal-Wallis Test {.tabset}
+Below, I use the Kruskal-Wallis test to run a non-parametric comparison of cell density and cell volume across each location. Then, I follow up with a Dunn's post hoc test. I also look at differences in cell density/volume between different snow colors within each site. 
+
+### Cell Density
+
+```{r}
+# Step 1: Kruskal-Wallis test for CellDensity
+kruskal_modelAP <- kruskal.test(CellDensity ~ Color, data = dfC %>% filter(Location == "Antarctic Peninsula"))
+
+kruskalResultsAP <- tibble(
+  Variable = "CellDensity",
+  kw_p = kruskal_modelAP$p.value
+)
+
+# Step 2: If significant, run Dunn's test
+dunn_modelAP <- dunnTest(CellDensity ~ factor(Color), data = dfC %>% filter(Location == "Antarctic Peninsula"), method = "bonferroni")
+dunn_tableAP <- dunn_modelAP$res
+
+# Step 3: Prepare results for plotting (only if Dunn's test ran)
+dunn_pairsAP <- dunn_tableAP %>%
+    mutate(
+      Variable = "CellDensity",
+      significant = P.adj < 0.05,
+      label = paste0("p=", round(P.adj, 3))
+    )
+
+```
+
+#### Visualize Results
+```{r}
+dunnPlot_CellDensityAP <- ggplot(dunn_pairsAP, aes(x = Comparison, y = Variable, fill = P.adj)) +
+    geom_tile() +
+    geom_tile(data = filter(dunn_pairsAP, significant), color = "black", linewidth = 0.75) +
+    geom_text(aes(label = label), size = 3) +
+    scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      axis.title = element_blank(),
+      panel.grid = element_blank()
+    )
+  
+dunnPlot_CellDensityAP
+  
+ggsave(dunnPlot_CellDensityAP, filename = "dunnPlot_CellDensityAP.png",
+       width = 7, height = 6, bg = "white")
+```
+
+### Volume 
+
+```{r}
+# Step 1: Kruskal-Wallis test for Volume
+kruskal_modelVAP <- kruskal.test(Volume ~ Color, data = dfCL %>% filter(Location == "Antarctic Peninsula"))
+
+kruskalResultsVAP <- tibble(
+  Variable = "Volume",
+  kw_p = kruskal_modelVAP$p.value
+)
+
+# Step 2: If significant, run Dunn's test
+dunn_modelVAP <- dunnTest(Volume ~ factor(Color), data = dfCL %>% filter(Location == "Antarctic Peninsula"), method = "bonferroni")
+dunn_tableVAP <- dunn_modelVAP$res
+
+# Step 3: Prepare results for plotting (only if Dunn's test ran)
+dunn_pairsVAP <- dunn_tableVAP %>%
+    mutate(
+      Variable = "Volume",
+      significant = P.adj < 0.05,
+      label = paste0("p=", round(P.adj, 3))
+    )
+
+```
+
+#### Visualize Results
+```{r}
+dunnPlot_VolumeVAP <- ggplot(dunn_pairsVAP, aes(x = Comparison, y = Variable, fill = P.adj)) +
+    geom_tile() +
+    geom_tile(data = filter(dunn_pairsVAP, significant), color = "black", linewidth = 0.75) +
+    geom_text(aes(label = label), size = 3) +
+    scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      axis.title = element_blank(),
+      panel.grid = element_blank()
+    )
+  
+dunnPlot_VolumeVAP
+  
+ggsave(dunnPlot_VolumeVAP, filename = "dunnPlot_VolumeVAP.png",
+       width = 7, height = 6, bg = "white")
+```
+
+# Box Plots {.tabset}
+
+## Cell Density (Region & Color)
+
+```{r}
+boxplotDensityRegion <- dfC %>%
+  ggplot(aes(x = Region, y = CellDensity, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.9, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Cell Density (cells/mL)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotDensityRegion
+
+ggsave(boxplotDensityRegion, filename = "boxplotDensityRegion.png", width = 6, height = 4, bg = "white")
+```
+
+## Cell Density (Color)
+
+```{r}
+boxplotDensity <- dfC %>%
+  ggplot(aes(x = Color, y = CellDensity, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Cell Density (cells/mL)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotDensity
+
+ggsave(boxplotDensity, filename = "boxplotDensity.png", width = 6, height = 4, bg = "white")
+```
+
+
+## Cell Volume (Color)
+
+```{r}
+boxplotVolume <- dfCL %>%
+  filter(Volume != 0) %>% 
+  ggplot(aes(x = Color, y = Volume, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.9,
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Cell Volume (μm^3)",
+    fill = NULL,
+    color = NULL
+  ) +
+  theme_minimal() +
+  plot_theme
+
+boxplotVolume
+
+ggsave(boxplotVolume, filename = "boxplotVolume.png", width = 6, height = 4, bg = "white")
+```
+
+## Cell Volume (Region & Color)
+```{r}
+boxplotVolumeRegion <- dfCL %>%
+  filter(Volume != 0) %>% 
+  ggplot(aes(x = Region, y = Volume, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.9,
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Cell Volume (μm^3)",
+    fill = NULL,
+    color = NULL
+  ) +
+  theme_minimal() +
+  plot_theme
+
+boxplotVolumeRegion
+
+ggsave(boxplotVolumeRegion, filename = "boxplotVolumeRegion.png", width = 6, height = 4, bg = "white")
+```
+
+# Pairs Plots - Cell Density/Volume and Anions {.tabset}
+
+```{r, warning = FALSE, message = FALSE}
+corplotAP <- dfCLAnion %>% 
+  ggpairs(  
+  columns = c("CellDensity", "Volume", "Fo", "Cl", "NO2NO3", "PO43", "SO42"), 
+  aes(color = Color, fill = Color, alpha = 0.8),
+  diag = list(continuous = wrap("barDiag")),
+  lower = list(continuous = wrap("points", na.rm = TRUE)),
+  upper = list(continuous = wrap("cor", size = 3, na.rm = TRUE, method = "spearman"))
+) + 
+  theme_minimal() +
+  pairsplot_theme + 
+  scale_color_manual(values = colorPal) + 
+  scale_fill_manual(values = colorPal) 
+   
+
+corplotAP
+
+ggsave(corplotAP, filename = "corplotAP.png", width = 7, height = 7, bg = "white")
+```
+
+
+# Cell Density vs. Cell Length {.tabset}
+
+## All sites 
+I am going to compare cell density vs. cell length across sites to see whether any trends appear here. For this plot, I kept the samples where cell length was zero.
+
+```{r}
+scatterCDCL <- dfCL %>% 
+  ggplot(aes(x = CellLength, y = CellDensity, color = Color)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE, linetype = "solid", linewidth = 0.8) +
+  scale_color_manual(values = colorPal) +
+  scale_y_sqrt() +
+  theme_minimal() + 
+  plot_theme + 
+  labs(x = "Cell Diameter (μm)",
+       y = "Cell Density (cells/mL)",
+       color = NULL)
+
+scatterCDCL 
+
+ggsave(scatterCDCL, filename = "scatterCDCL.png", width = 7, height = 4, bg = "white")
+```
+
+
+# Spearman's Correlation {.tabset}
+
+### Antarctic Peninsula
+```{r}
+APcor_densityVolume <- dfCL %>%
+  filter(Location == "Antarctic Peninsula") %>%
+  { cor.test(~ CellDensity + Volume, data = . , method = "spearman") }
+
+APcor_densityVolume
+```
+
+```{r}
+APcor_densityVolumeR <- dfCL %>%
+  filter(Location == "Antarctic Peninsula") %>%
+  filter(Color == "red") %>% 
+  { cor.test(~ CellDensity + Volume, data = . , method = "spearman") }
+
+APcor_densityVolumeR
+```
+
+```{r}
+APcor_densityVolumeG <- dfCL %>%
+  filter(Location == "Antarctic Peninsula") %>%
+  filter(Color == "green") %>% 
+  { cor.test(~ CellDensity + Volume, data = . , method = "spearman") }
+
+APcor_densityVolumeG
+```
+
+
+# Heat Maps - Cell Density/Volume & Anions {.tabset}
+
+## Cell Density
+
+```{r}
+# Variable groups
+algae_vars <- c("CellDensity")
+anion_vars <- c("Cl", "NO2NO3", "SO42", "PO43", "Fo")
+
+# Function to extract correlations
+get_correlation_data <- function(data, location_name, algae_name) {
+
+  cor_matrix <- rcorr(
+    as.matrix(data[, c(algae_vars, anion_vars)]),
+    type = "spearman"
+  )
+
+  r_vals <- cor_matrix$r
+  p_vals <- cor_matrix$P
+
+  pairs <- expand.grid(
+    AlgaeVar = algae_vars,
+    Anion = anion_vars,
+    stringsAsFactors = FALSE
+  )
+
+  results <- pairs %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[AlgaeVar, Anion],
+      p_value = p_vals[AlgaeVar, Anion],
+      significant = p_value < 0.05,
+      label = paste0(
+        round(Spearman_r, 2),
+        "\n(p=", round(p_value, 3), ")"
+      ),
+      Location = location_name,
+      SnowColor = algae_name
+    ) %>%
+    ungroup()
+
+  return(results)
+}
+
+# Filtered datasets
+# Red + Green only
+df_rg <- dfCAnion %>%
+  filter(
+    Location == "Antarctic Peninsula",
+    Color %in% c("red", "green")
+  ) %>%
+  select(Location, Color, all_of(c(algae_vars, anion_vars))) %>%
+  na.omit()
+
+# ALL samples (includes clean)
+df_all <- dfCAnion %>%
+  filter(Location == "Antarctic Peninsula") %>%
+  select(Location, Color, all_of(c(algae_vars, anion_vars))) %>%
+  na.omit()
+
+# Correlations
+# Red + Green (separate rows)
+cor_rg <- df_rg %>%
+  group_split(Location, Color) %>%
+  map_dfr(~get_correlation_data(
+    .x,
+    unique(.x$Location),
+    unique(.x$Color)
+  ))
+
+# Algae pooled (red + green)
+cor_algae <- df_rg %>%
+  group_by(Location) %>%
+  group_split() %>%
+  map_dfr(~get_correlation_data(
+    .x,
+    unique(.x$Location),
+    "algae"
+  ))
+
+# All samples pooled (red + green + clean)
+cor_all <- df_all %>%
+  group_by(Location) %>%
+  group_split() %>%
+  map_dfr(~get_correlation_data(
+    .x,
+    unique(.x$Location),
+    "all"
+  ))
+
+# Combine results
+cor_results_full <- bind_rows(
+  cor_rg,
+  cor_algae,
+  cor_all
+)
+
+# Factor ordering for clean y-axis
+cor_results_full$SnowColor <- factor(
+  cor_results_full$SnowColor,
+  levels = c("red", "green", "algae", "all")
+)
+
+cor_results_full$Anion <- factor(
+  cor_results_full$Anion,
+  levels = anion_vars
+)
+
+# Plot
+spearmanPlotAPRG <- ggplot(
+  cor_results_full,
+  aes(
+    x = Anion,
+    y = interaction(Location, SnowColor, sep = " - "),
+    fill = Spearman_r
+  )
+) +
+  geom_tile() +
+  geom_tile(
+    data = filter(cor_results_full, significant),
+    color = "black",
+    linewidth = 0.75
+  ) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    name = "Spearman r"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    axis.text.y = element_text(size = 8)
+  )
+
+spearmanPlotAPRG
+
+# Save
+ggsave(
+  spearmanPlotAPRG,
+  filename = "spearmanPlotAPRG.png",
+  width = 9,
+  height = 7,
+  bg = "white"
+)
+```
+
+## Cell Volume
+
+```{r}
+
+# Variable groups
+algae_vars <- c("Volume")
+anion_vars <- c("Cl", "NO2NO3", "SO42", "PO43", "Fo")
+
+# Function to extract correlations
+get_correlation_data <- function(data, location_name, algae_name) {
+
+  cor_matrix <- rcorr(
+    as.matrix(data[, c(algae_vars, anion_vars)]),
+    type = "spearman"
+  )
+
+  r_vals <- cor_matrix$r
+  p_vals <- cor_matrix$P
+
+  pairs <- expand.grid(
+    AlgaeVar = algae_vars,
+    Anion = anion_vars,
+    stringsAsFactors = FALSE
+  )
+
+  results <- pairs %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[AlgaeVar, Anion],
+      p_value = p_vals[AlgaeVar, Anion],
+      significant = p_value < 0.05,
+      label = paste0(
+        round(Spearman_r, 2),
+        "\n(p=", round(p_value, 3), ")"
+      ),
+      Location = location_name,
+      SnowColor = algae_name
+    ) %>%
+    ungroup()
+
+  return(results)
+}
+
+# Filtered datasets
+# Red + Green only
+df_rg <- dfCLAnion %>%
+  filter(
+    Location == "Antarctic Peninsula",
+    Color %in% c("red", "green")
+  ) %>%
+  select(Location, Color, all_of(c(algae_vars, anion_vars))) %>%
+  na.omit()
+
+# ALL samples (includes clean)
+df_all <- dfCLAnion %>%
+  filter(Location == "Antarctic Peninsula") %>%
+  select(Location, Color, all_of(c(algae_vars, anion_vars))) %>%
+  na.omit()
+
+# Correlations
+# Red + Green (separate rows)
+cor_rg <- df_rg %>%
+  group_split(Location, Color) %>%
+  map_dfr(~get_correlation_data(
+    .x,
+    unique(.x$Location),
+    unique(.x$Color)
+  ))
+
+# Algae pooled (red + green)
+cor_algae <- df_rg %>%
+  group_by(Location) %>%
+  group_split() %>%
+  map_dfr(~get_correlation_data(
+    .x,
+    unique(.x$Location),
+    "algae"
+  ))
+
+# All samples pooled (red + green + clean)
+cor_all <- df_all %>%
+  group_by(Location) %>%
+  group_split() %>%
+  map_dfr(~get_correlation_data(
+    .x,
+    unique(.x$Location),
+    "all"
+  ))
+
+# Combine results
+cor_results_full <- bind_rows(
+  cor_rg,
+  cor_algae,
+  cor_all
+)
+
+# Factor ordering for clean y-axis
+cor_results_full$SnowColor <- factor(
+  cor_results_full$SnowColor,
+  levels = c("red", "green", "algae", "all")
+)
+
+cor_results_full$Anion <- factor(
+  cor_results_full$Anion,
+  levels = anion_vars
+)
+
+# Plot
+spearmanPlotVAPRG <- ggplot(
+  cor_results_full,
+  aes(
+    x = Anion,
+    y = interaction(Location, SnowColor, sep = " - "),
+    fill = Spearman_r
+  )
+) +
+  geom_tile() +
+  geom_tile(
+    data = filter(cor_results_full, significant),
+    color = "black",
+    linewidth = 0.75
+  ) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    name = "Spearman r"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    axis.text.y = element_text(size = 8)
+  )
+
+spearmanPlotVAPRG
+
+# Save
+ggsave(
+  spearmanPlotVAPRG,
+  filename = "spearmanPlotVAPRG.png",
+  width = 9,
+  height = 7,
+  bg = "white"
+)
+```
+
+
+
+
+
+

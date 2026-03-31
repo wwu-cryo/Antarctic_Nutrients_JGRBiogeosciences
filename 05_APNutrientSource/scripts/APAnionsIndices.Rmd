@@ -1,0 +1,1008 @@
+---
+title: "Antarctic Peninsula - Anions & Index Scores"
+author: "Ellie Ryan"
+date: "`r Sys.Date()`"
+output:
+   html_document:
+    theme: flatly
+    highlight: zenburn
+    toc: true
+    toc_float: true
+    toc_collapsed: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Created:** 9/7/2025
+
+**Last Modified:** 2/18/2026
+
+```{r, message=FALSE, warning=FALSE}
+# Load packages
+library(tidyverse)
+library(lubridate)
+library(stringr)
+library(kableExtra)
+library(scales)
+library(GGally)
+library(car)
+library(FSA)
+library(Hmisc)
+library(patchwork)
+library(cowplot)
+```
+
+```{r}
+plot_theme <- theme(
+  text = element_text(family = "Helvetica"),
+  axis.title = element_text(size = 12), # Axis labels: 12 pt, bold
+  axis.text = element_text(size = 12), # Axis text: 12 pt
+  axis.line = element_line(linewidth = 0.5),  # Thicker axis line
+  legend.position = "top", # Position legend at the top
+  legend.justification = c(0, 1), # Justify legend to top-left
+  legend.text = element_text(size = 12), # Legend text: 12 pt
+  legend.title = element_text(size = 12), 
+  plot.title = element_text(size = 14, face = "bold"),  # Adjust plot title size
+  plot.subtitle = element_text(size = 13, face = "italic"), 
+  plot.margin = margin(20, 20, 20, 20)
+)
+
+plot_themePub <- theme(
+  text = element_text(family = "Helvetica"),
+  axis.title.x = element_text(size = 12, margin = margin(t = 10)),  # t = top margin
+  axis.title.y = element_text(size = 12, margin = margin(r = 10)),  # r = right margin
+  axis.text = element_text(size = 12),
+  axis.line = element_blank(),
+  axis.ticks.x = element_blank(),
+  axis.ticks.y = element_line(color = "black", size = 0.25),  # Add tick marks
+  axis.ticks.length = unit(-0.15, "cm"),  # Length of tick marks
+  panel.grid = element_blank(),
+  panel.background = element_blank(),
+  panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
+  legend.position = "top",
+  legend.justification = c(0, 1),
+  legend.text = element_text(size = 12),
+  legend.title = element_text(size = 12),
+  plot.title = element_text(size = 14, face = "bold"),
+  plot.subtitle = element_text(size = 13, face = "italic"),
+  plot.margin = margin(10, 10, 10, 10)
+)
+
+
+plot_theme2 <- theme(
+  text = element_text(family = "Helvetica"),
+  axis.title = element_text(size = 12, face = "bold"), # Axis labels: 12 pt, bold
+  axis.text = element_text(size = 12), # Axis text: 12 pt
+  axis.line = element_line(linewidth = 0.5),  # Thicker axis line
+  legend.position = "top", # Position legend at the top
+  legend.justification = c(0, 1), # Justify legend to top-left
+  legend.text = element_text(size = 12), # Legend text: 12 pt
+  legend.title = element_text(size = 12), 
+  plot.title = element_text(size = 14, face = "bold"),  # Adjust plot title size
+  plot.subtitle = element_text(size = 13, face = "italic"), 
+  axis.text.x = element_text(angle = 45, hjust = 1), 
+  plot.margin = margin(20, 20, 20, 20)
+)
+
+pairsplot_theme <- theme(
+  text = element_text(size = 10, family = "Helvetica"),  # Adjust variable name text size
+  axis.text = element_text(size = 8),  # Adjust axis text size
+  plot.title = element_text(size = 12, face = "bold"),  # Adjust plot title size
+  legend.text = element_text(size = 12))  # Adjust legend text size
+
+colorPal <- c(
+  "clean" = "#769a9c",
+  "red" = "#933410",
+  "green" = "#326e35"
+)
+
+anionPal <- c(
+  "PO43" = "#7887A4FF",
+  "Cl" = "#9B6981FF",
+  "SO42" = "#682C37FF",
+  "Fo" = "#F6955EFF",
+  "NO2NO3" = "#A8CDECFF"
+)
+
+indexPal <- c(
+  "WSI" = "#3F3F44",
+  "OSI" = "#728187",
+  "RDSI" = "#7A5C3E"
+)
+```
+
+# Overview 
+The purpose of this analysis is to assess the relationship between anion concentration and index scores for my 2025 Antarctic Peninsula samples (excluding Petermann Island). Upon sample collection, index values were assigned to each sample location for three different metrics: proximity to rocky outcroppings/dust, proximity to ocean/oceanic influence, and wildlife presence. For each index, a score of 1-4 was assigned, with 4 indicating the highest influence of a given variable. 
+
+From outlier analysis, the following outliers were identified for removal:
+
+-   2025-02-19-SI-algae3
+-   2025-02-24-DA-algae2
+-   2025-02-24-DA-algae1 (anion only)
+-   2025-02-24-DA-algae6
+-   2025-03-07-NH-algae3
+
+See the Thesis Figures (Preliminary) doc for justification for removal of each. Likely, more samples will be removed following visualization of pigment distribution. 
+
+## Data Wrangling
+
+```{r}
+df <- read.csv("APIndices.csv")
+str(df)
+```
+
+```{r}
+# Format date column 
+df <- df %>%
+  mutate(
+    Date = as.Date(Date, format = "%m/%d/%y"))
+```
+
+```{r}
+# Add Algae column
+df <- df %>% 
+   mutate(Algae = case_when(
+    Color %in% c("red", "green") ~ "algae",
+    Color == "clean" ~ 'clean'
+  )) %>% 
+  relocate(Algae, .after = Color)
+
+# Convert anion concentrations to µM
+df <- df %>% 
+  mutate(Fo = 22.21*Fo,
+         Cl = 28.21*Cl,
+         NO2 = 21.73*NO2,
+         NO3 = 16.13*NO3, 
+         PO43 = 10.53*PO43, 
+         SO42 = 10.41*SO42)
+```
+
+```{r}
+outliers <- c(
+  "2025-02-19-SI-algae3",
+  "2025-02-24-DA-algae2",
+  "2025-02-24-DA-algae1",
+  "2025-02-24-DA-algae6",
+  "2025-03-07-NH-algae3")
+
+df <- df %>% 
+  filter(!SampleID %in% outliers)
+```
+
+### Anions
+```{r}
+dfAnion <- df %>% 
+  select(c("SampleID", "Date", "Location", "Site", "Color", "Algae", Fo:SO42, WildlifeScoringIndex:RocksDustScoringIndex)) %>% 
+  mutate(Algae = case_when(
+    Color %in% c("red", "green") ~ "algae",
+    Color == "clean" ~ 'clean'
+  )) %>% 
+  mutate(NO2NO3 = NO2 + NO3) %>% 
+  relocate(Algae, .after = Color) %>% 
+  relocate(NO2NO3, .after = Cl) %>% 
+  select(!NO2) %>% 
+  select(!NO3) %>% 
+  na.omit(dfAnion)
+
+# Abbreviate indices
+dfAnion <- dfAnion %>% 
+  mutate(WSI = WildlifeScoringIndex) %>% 
+  relocate(WSI, .after = RocksDustScoringIndex) %>% 
+  mutate(OSI = OceanicInfluenceScoringIndex) %>% 
+  relocate(OSI, .after = WSI) %>% 
+  mutate(RDSI = RocksDustScoringIndex) %>% 
+  relocate(RDSI, .after = OSI)
+```
+
+### Anions (Pivoted)
+```{r}
+dfAnion_long <- dfAnion %>% 
+  pivot_longer(cols = c(Fo, Cl, SO42, PO43, NO2NO3),
+               names_to = "Anion",
+               values_to = "Concentration")
+```
+
+### Scoring Index (Pivoted)
+```{r}
+dfIndex_long <- dfAnion %>% 
+  pivot_longer(cols = c(WildlifeScoringIndex, OceanicInfluenceScoringIndex, RocksDustScoringIndex),
+               names_to = "Index",
+               values_to = "Score")
+
+dfIndex_long <- dfIndex_long %>%
+  mutate(Score = factor(Score))
+
+dfIndex_long <- dfIndex_long %>% 
+  mutate(IndexAbbrev = 
+           case_when(
+             Index == "WildlifeScoringIndex" ~ paste("WSI"),
+             Index == "OceanicInfluenceScoringIndex" ~ paste("OSI"),
+             Index == "RocksDustScoringIndex" ~ paste("RDSI")
+           )) %>% 
+  relocate(IndexAbbrev, .after = Index)
+```
+
+
+# Summary Tables {.tabset}
+
+## Formate 
+```{r}
+# Anion Summary (formate)
+FoSummary <- dfIndex_long %>% 
+  group_by(Index, Score) %>% 
+  summarise(
+    n = n(),
+    Fo_mean = round(mean(Fo, na.rm = TRUE), 2),
+    Fo_median = round(median(Fo, na.rm = TRUE), 2),
+    Fo_max = round(max(Fo, na.rm = TRUE), 2),
+    Fo_min = round(min(Fo, na.rm = TRUE), 2),
+    Fo_sd = round(sd(Fo, na.rm = TRUE), 2),
+    .groups = "drop"
+  )
+
+# Format table with kableExtra
+FoSummary %>% 
+  kable("html", caption = "Summary Statistics for Formate by Snow Color and Location (ppm)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+## Chloride 
+```{r}
+# Anion Summary (Chloride)
+ClSummary <- dfIndex_long %>% 
+  group_by(Index, Score) %>% 
+  summarise(
+    n = n(),
+    Cl_mean = round(mean(Cl, na.rm = TRUE), 2),
+    Cl_median = round(median(Cl, na.rm = TRUE), 2),
+    Cl_max = round(max(Cl, na.rm = TRUE), 2),
+    Cl_min = round(min(Cl, na.rm = TRUE), 2),
+    Cl_sd = round(sd(Cl, na.rm = TRUE), 2),
+    .groups = "drop"
+  )
+
+# Format table with kableExtra
+ClSummary %>% 
+  kable("html", caption = "Summary Statistics for Chloride by Snow Color and Location (ppm)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+## Nitrate/Nitrite
+```{r}
+# Anion Summary (Nitrate/Nitrite)
+NO2NO3Summary <- dfIndex_long %>% 
+  group_by(Index, Score) %>% 
+  summarise(
+    n = n(),
+    NO2NO3_mean = round(mean(NO2NO3, na.rm = TRUE), 2),
+    NO2NO3_median = round(median(NO2NO3, na.rm = TRUE), 2),
+    NO2NO3_max = round(max(NO2NO3, na.rm = TRUE), 2),
+    NO2NO3_min = round(min(NO2NO3, na.rm = TRUE), 2),
+    NO2NO3_sd = round(sd(NO2NO3, na.rm = TRUE), 2),
+    .groups = "drop"
+  )
+
+# Format table with kableExtra
+NO2NO3Summary %>% 
+  kable("html", caption = "Summary Statistics for Nitrate/Nitrite by Snow Color and Location (ppm)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+## Phosphate 
+```{r}
+# Anion Summary (Phosphate)
+PO43Summary <- dfIndex_long %>% 
+  group_by(Index, Score) %>% 
+  summarise(
+    n = n(),
+    PO43_mean = round(mean(PO43, na.rm = TRUE), 2),
+    PO43_median = round(median(PO43, na.rm = TRUE), 2),
+    PO43_max = round(max(PO43, na.rm = TRUE), 2),
+    PO43_min = round(min(PO43, na.rm = TRUE), 2),
+    PO43_sd = round(sd(PO43, na.rm = TRUE), 2),
+    .groups = "drop"
+  )
+
+# Format table with kableExtra
+PO43Summary %>% 
+  kable("html", caption = "Summary Statistics for Phosphate by Snow Color and Location (ppm)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+## Sulfate 
+```{r}
+# Anion Summary (Sulfate)
+SO42Summary <- dfIndex_long %>% 
+  group_by(Index, Score) %>% 
+  summarise(
+    n = n(),
+    SO42_mean = round(mean(SO42, na.rm = TRUE), 2),
+    SO42_median = round(median(SO42, na.rm = TRUE), 2),
+    SO42_max = round(max(SO42, na.rm = TRUE), 2),
+    SO42_min = round(min(SO42, na.rm = TRUE), 2),
+    SO42_sd = round(sd(SO42, na.rm = TRUE), 2),
+    .groups = "drop"
+  )
+
+# Format table with kableExtra
+SO42Summary %>% 
+  kable("html", caption = "Summary Statistics for Sulfate by Snow Color and Location (ppm)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+# ANOVA/Kruskal Wallis Test {.tabset}
+Before proceeding with an ANOVA test to assess differences in anion concentration between index scores, I am going to check to see if these variables follow the assumptions of normality and equal variance required to run an ANOVA. I will repeat this for each index.
+
+## Wildlife Scoring Index
+```{r}
+# Step 1: Group by Anion and nest data
+nested <- dfAnion_long %>%
+  group_by(Anion) %>%
+  nest()
+
+# Step 2: Fit ANOVA model, extract residuals, and run tests
+anovaAssumptionsResults <- nested %>%
+  mutate(
+    # Fit ANOVA model
+    aov_model = map(data, ~ aov(Concentration ~ WildlifeScoringIndex, data = .x)),
+    
+    # Shapiro-Wilk test for normality of residuals
+    shapiro_p = map_dbl(aov_model, ~ shapiro.test(residuals(.x))$p.value),
+    
+    # Levene's Test for homogeneity of variance
+    levene_p = map_dbl(data, ~leveneTest(Concentration ~ factor(WildlifeScoringIndex), data = .x)$`Pr(>F)`[1])
+  )
+```
+
+From the below results, it appears that none of the anions are both normally distributed and have equal variances. Because of this, I am going to proceed with a Kruskal-Wallis test in lieu of an ANOVA. 
+
+```{r}
+anovaAssumptionsResults %>%
+  select(Anion, shapiro_p, levene_p) %>%
+  mutate(
+    normality_ok = shapiro_p > 0.05,
+    homogeneity_ok = levene_p > 0.05
+  )
+```
+
+## Oceanic Influence Scoring Index
+```{r}
+# Step 1: Group by Anion and nest data
+nested <- dfAnion_long %>%
+  group_by(Anion) %>%
+  nest()
+
+# Step 2: Fit ANOVA model, extract residuals, and run tests
+anovaAssumptionsResults <- nested %>%
+  mutate(
+    # Fit ANOVA model
+    aov_model = map(data, ~ aov(Concentration ~ OceanicInfluenceScoringIndex, data = .x)),
+    
+    # Shapiro-Wilk test for normality of residuals
+    shapiro_p = map_dbl(aov_model, ~ shapiro.test(residuals(.x))$p.value),
+    
+    # Levene's Test for homogeneity of variance
+    levene_p = map_dbl(data, ~leveneTest(Concentration ~ factor(OceanicInfluenceScoringIndex), data = .x)$`Pr(>F)`[1])
+  )
+```
+
+From the below results, it appears that none of the anions are both normally distributed and have equal variances. Because of this, I am going to proceed with a Kruskal-Wallis test in lieu of an ANOVA. 
+
+```{r}
+anovaAssumptionsResults %>%
+  select(Anion, shapiro_p, levene_p) %>%
+  mutate(
+    normality_ok = shapiro_p > 0.05,
+    homogeneity_ok = levene_p > 0.05
+  )
+```
+
+## Rocks/Dust Scoring Index
+```{r}
+# Step 1: Group by Anion and nest data
+nested <- dfAnion_long %>%
+  group_by(Anion) %>%
+  nest()
+
+# Step 2: Fit ANOVA model, extract residuals, and run tests
+anovaAssumptionsResults <- nested %>%
+  mutate(
+    # Fit ANOVA model
+    aov_model = map(data, ~ aov(Concentration ~ RocksDustScoringIndex, data = .x)),
+    
+    # Shapiro-Wilk test for normality of residuals
+    shapiro_p = map_dbl(aov_model, ~ shapiro.test(residuals(.x))$p.value),
+    
+    # Levene's Test for homogeneity of variance
+    levene_p = map_dbl(data, ~leveneTest(Concentration ~ factor(RocksDustScoringIndex), data = .x)$`Pr(>F)`[1])
+  )
+```
+
+From the below results, it appears that none of the anions are both normally distributed and have equal variances. Because of this, I am going to proceed with a Kruskal-Wallis test in lieu of an ANOVA. 
+
+```{r}
+anovaAssumptionsResults %>%
+  select(Anion, shapiro_p, levene_p) %>%
+  mutate(
+    normality_ok = shapiro_p > 0.05,
+    homogeneity_ok = levene_p > 0.05
+  )
+```
+
+## Kruskal-Wallis Test {.tabset}
+Below, I use the Kruskal-Wallis test to run a non-parametric comparison of each anion across each score for each index. Then, I follow up with a Dunn's post hoc test for the anions that show significant differences between the index scores. 
+
+### Wildlife Scoring Index
+```{r}
+kruskalResultsWSI <- dfAnion_long %>%
+  group_by(Anion) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ WildlifeScoringIndex, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value)
+  )
+
+# Run Dunn's test 
+kruskalResultsWSI <- kruskalResultsWSI %>%
+  mutate(
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(WildlifeScoringIndex), data = .x, method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+#### Visualize Results
+```{r}
+dunn_pairs <- kruskalResultsWSI %>%
+  select(Anion, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlotWSI <- ggplot(dunn_pairs, aes(x = Comparison, y = Anion, fill = P.adj)) +
+  geom_tile() +
+  geom_tile(data = filter(dunn_pairs, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) 
+
+dunnPlotWSI
+
+ggsave(dunnPlotWSI, filename = "dunnPlotWSI.png", width = 7, height = 6, bg = "white")
+```
+
+### Oceanic Influence Scoring Index
+```{r}
+kruskalResultsOSI <- dfAnion_long %>%
+  group_by(Anion) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ OceanicInfluenceScoringIndex, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value)
+  )
+
+# Run Dunn's test 
+kruskalResultsOSI <- kruskalResultsOSI %>%
+  mutate(
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(OceanicInfluenceScoringIndex), data = .x, method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+#### Visualize Results
+```{r}
+dunn_pairs <- kruskalResultsOSI %>%
+  select(Anion, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlotOSI <- ggplot(dunn_pairs, aes(x = Comparison, y = Anion, fill = P.adj)) +
+  geom_tile() +
+  geom_tile(data = filter(dunn_pairs, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) 
+
+dunnPlotOSI
+
+ggsave(dunnPlotOSI, filename = "dunnPlotOSI.png", width = 7, height = 6, bg = "white")
+```
+
+### Rocks/Dust Scoring Index
+```{r}
+kruskalResultsRDSI <- dfAnion_long %>%
+  group_by(Anion) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ RocksDustScoringIndex, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value)
+  )
+
+# Run Dunn's test 
+kruskalResultsRDSI <- kruskalResultsRDSI %>%
+  mutate(
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(RocksDustScoringIndex), data = .x, method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+#### Visualize Results
+```{r}
+dunn_pairs <- kruskalResultsRDSI %>%
+  select(Anion, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlotRDSI <- ggplot(dunn_pairs, aes(x = Comparison, y = Anion, fill = P.adj)) +
+  geom_tile() +
+  geom_tile(data = filter(dunn_pairs, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) 
+
+dunnPlotRDSI
+
+ggsave(dunnPlotRDSI, filename = "dunnPlotRDSI.png", width = 7, height = 6, bg = "white")
+```
+
+# Box Plots {.tabset}
+
+## Formate
+```{r}
+boxplotFo <- dfIndex_long %>%
+  ggplot(aes(x = Score, y = Fo)) +
+  geom_boxplot(alpha = 0.8, width = 0.8, fill = "#3b3f6e", color = "#2e3157") +
+  facet_wrap(~ IndexAbbrev, scales = "free_x") +
+  labs(
+    x = "Score",
+    y = "Concentration (ppm)"
+  ) +
+  theme_minimal() +
+  plot_theme +
+  theme(panel.spacing.x = unit(0.7, "cm")) 
+
+boxplotFo
+
+ggsave(boxplotFo, filename = "boxplotFo.png", width = 7, height = 5, bg = "white")
+```
+
+## Chloride
+```{r}
+boxplotCl <- dfIndex_long %>%
+  ggplot(aes(x = Score, y = Cl)) +
+  geom_boxplot(alpha = 0.8, width = 0.8, fill = "#3b3f6e", color = "#2e3157") +
+  facet_wrap(~ IndexAbbrev, scales = "free_x") +
+  labs(
+    x = "Score",
+    y = "Concentration (ppm)"
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme +
+  theme(panel.spacing.x = unit(0.7, "cm")) 
+
+boxplotCl
+
+ggsave(boxplotCl, filename = "boxplotCl.png", width = 7, height = 5, bg = "white")
+```
+
+## Nitrate/Nitrite
+```{r}
+boxplotNO2NO3 <- dfIndex_long %>%
+  ggplot(aes(x = Score, y = NO2NO3)) +
+  geom_boxplot(alpha = 0.8, width = 0.8, fill = "#3b3f6e", color = "#2e3157") +
+  facet_wrap(~ IndexAbbrev, scales = "free_x") +
+  labs(
+    x = "Score",
+    y = "Concentration (ppm)"
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme +
+  theme(panel.spacing.x = unit(0.7, "cm")) 
+
+boxplotNO2NO3
+
+ggsave(boxplotNO2NO3, filename = "boxplotNO2NO3.png", width = 7, height = 5, bg = "white")
+```
+
+## Phosphate
+```{r}
+boxplotPO43 <- dfIndex_long %>%
+  ggplot(aes(x = Score, y = PO43)) +
+  geom_boxplot(alpha = 0.8, width = 0.8, fill = "#3b3f6e", color = "#2e3157") +
+  facet_wrap(~ IndexAbbrev, scales = "free_x") +
+  labs(
+    x = "Score",
+    y = "Concentration (ppm)"
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme +
+  theme(panel.spacing.x = unit(0.7, "cm")) 
+
+boxplotPO43
+
+ggsave(boxplotPO43, filename = "boxplotPO43.png", width = 7, height = 5, bg = "white")
+```
+
+## Sulfate 
+```{r}
+boxplotSO42 <- dfIndex_long %>%
+  ggplot(aes(x = Score, y = SO42)) +
+  geom_boxplot(alpha = 0.8, width = 0.8, fill = "#3b3f6e", color = "#2e3157") +
+  facet_wrap(~ IndexAbbrev, scales = "free_x") +
+  labs(
+    x = "Score",
+    y = "Concentration (ppm)"
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme +
+  theme(panel.spacing.x = unit(0.7, "cm")) 
+
+boxplotSO42
+
+ggsave(boxplotSO42, filename = "boxplotSO42.png", width = 7, height = 5, bg = "white")
+```
+
+## Snow Color and Index Score {.tabset}
+
+### WSI
+```{r}
+boxplotColorWSI <- dfAnion %>% 
+  ggplot(aes(x = WildlifeScoringIndex, fill = Color)) + 
+  geom_bar(position = "dodge") + 
+  labs( x = "WSI Score", 
+        y = "Count",
+        color = NULL,
+        fill = NULL) + 
+  scale_fill_manual(values = colorPal) +
+  theme_minimal() +
+  plot_theme
+
+boxplotColorWSI
+
+ggsave(boxplotColorWSI, filename = "boxplotColorWSI.png", width = 7, height = 5, bg = "white")
+```
+
+### OSI
+```{r}
+boxplotColorOSI <- dfAnion %>% 
+  ggplot(aes(x = OceanicInfluenceScoringIndex, fill = Color)) + 
+  geom_bar(position = "dodge") + 
+  labs( x = "OSI Score", 
+        y = "Count",
+        color = NULL,
+        fill = NULL) + 
+  scale_fill_manual(values = colorPal) +
+  theme_minimal() +
+  plot_theme
+
+boxplotColorOSI
+
+ggsave(boxplotColorOSI, filename = "boxplotColorOSI.png", width = 7, height = 5, bg = "white")
+```
+
+### RDSI
+```{r}
+boxplotColorRDSI <- dfAnion %>% 
+  ggplot(aes(x = RocksDustScoringIndex, fill = Color)) + 
+  geom_bar(position = "dodge") + 
+  labs( x = "RDSI Score", 
+        y = "Count",
+        color = NULL,
+        fill = NULL) + 
+  scale_fill_manual(values = colorPal) +
+  theme_minimal() +
+  plot_theme
+
+boxplotColorRDSI
+
+ggsave(boxplotColorRDSI, filename = "boxplotColorRDSI.png", width = 7, height = 5, bg = "white")
+```
+
+# Heat Maps - Anions & Index Scores
+```{r}
+# Define pigment and Indexvariables
+anion_vars <- c("Cl", "NO2NO3", "SO42", "PO43", "Fo")
+index_vars <- c("WSI", "OSI", "RDSI")
+
+# Filter to just the necessary columns
+df_filtered <- dfAnion %>%
+  select(Location, all_of(anion_vars), all_of(index_vars)) %>%
+  na.omit()
+
+# Function to compute Anion–IndexSpearman correlations per location
+get_Anion_Index_corr <- function(data, location_name) {
+  cor_matrix <- rcorr(as.matrix(data[, -1]), type = "spearman")
+
+  r_vals <- cor_matrix$r
+  p_vals <- cor_matrix$P
+
+  # Create all Anion–Indexpair combinations
+  pairs <- expand.grid(Anion = anion_vars, Index = index_vars, stringsAsFactors = FALSE)
+
+  results <- pairs %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[Index, Anion],  # rows are Indexs, cols are Anions
+      p_value = p_vals[Index, Anion],
+      significant = p_value < 0.05,
+      label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+      Location = location_name
+    ) %>%
+    ungroup()
+
+  return(results)
+}
+
+# Compute correlations for each location
+cor_results <- df_filtered %>%
+  group_split(Location) %>%
+  map_dfr(~get_Anion_Index_corr(.x, unique(.x$Location)))
+
+# Convert to factors to preserve axis order
+cor_results$Anion <- factor(cor_results$Anion, levels = anion_vars)
+cor_results$Index <- factor(cor_results$Index, levels = index_vars)
+
+# Plot
+heatmapAnionIndex <- ggplot(cor_results, aes(x = Anion, y = Index, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = filter(cor_results, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  facet_wrap(~Location, ncol =1) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0, name = "Spearman r") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  )
+
+heatmapAnionIndex
+
+ggsave(heatmapAnionIndex, filename = "heatmapAnionIndex.png", width = 7, height = 5, bg = "white")
+```
+
+
+
+# Publication Figures
+
+## Index-Anion Boxplots {.tabset}
+
+### PO43-WSI
+```{r}
+boxplotPO43_WSI <- dfIndex_long %>%
+  filter(IndexAbbrev == "WSI") %>% 
+  ggplot(aes(x = Score, y = PO43, fill = IndexAbbrev, color = IndexAbbrev)) +
+  geom_boxplot(alpha = 0.9, width = 0.8) +
+  scale_fill_manual(values = indexPal) +
+  scale_color_manual(values = indexPal) +
+  labs(
+    x = NULL,
+    y = expression("[ "*PO[4]^{"3-"}*" ]" ~ "(µM)"),
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt(breaks = c(0, 2, 20, 50, 100, 200, 400),
+               labels = function(x) ifelse(x < 1, x, as.integer(x))) +
+  theme_minimal() +
+  plot_themePub +
+  theme(legend.position = "none")+
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    )
+  )
+
+boxplotPO43_WSI
+```
+
+
+### Cl-OSI & RDSI
+```{r}
+boxplotCl_OSI_RDSI <- dfIndex_long %>%
+  filter(IndexAbbrev %in% c("OSI", "RDSI")) %>% 
+  ggplot(aes(x = Score, y = Cl, fill = IndexAbbrev, color = IndexAbbrev)) +
+  geom_boxplot(alpha = 0.9, width = 0.8) +
+  scale_fill_manual(values = indexPal) +
+  scale_color_manual(values = indexPal) +
+  labs(
+    x = NULL,
+    y = expression("[ "*Cl^{"-"}*" ]" ~ "(µM)"),
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt(breaks = c(0, 10, 50, 100, 300, 600, 900),
+               labels = function(x) ifelse(x < 1, x, as.integer(x))) +
+  theme_minimal() +
+  plot_themePub +
+  theme(legend.position = "none")+
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    )
+  )
+
+boxplotCl_OSI_RDSI
+```
+
+### Fo-OSI
+```{r}
+boxplotFo_OSI <- dfIndex_long %>%
+  filter(IndexAbbrev == "OSI") %>% 
+  ggplot(aes(x = Score, y = Fo, fill = IndexAbbrev, color = IndexAbbrev)) +
+  geom_boxplot(alpha = 0.9, width = 0.8) +
+  scale_fill_manual(values = indexPal) +
+  scale_color_manual(values = indexPal) +
+  labs(
+    x = NULL,
+    y = expression("[ "*HCOO^{"-"}*" ]" ~ "(µM)"),
+    fill = NULL,
+    color = NULL) +
+  theme_minimal() +
+  plot_themePub +
+  theme(legend.position = "none")+
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    )
+  )
+
+boxplotFo_OSI
+```
+
+### SO42-RDSI
+```{r}
+boxplotSO42_RDSI <- dfIndex_long %>%
+  filter(IndexAbbrev == "RDSI") %>% 
+  ggplot(aes(x = Score, y = SO42, fill = IndexAbbrev, color = IndexAbbrev)) +
+  geom_boxplot(alpha = 0.9, width = 0.8) +
+  scale_fill_manual(values = indexPal) +
+  scale_color_manual(values = indexPal) +
+  labs(
+    x = NULL,
+    y = expression("[ "*SO[4]^{"2-"}*" ]" ~ "(µM)"),
+    fill = NULL,
+    color = NULL) +
+  scale_y_continuous(limits = c(0, NA)) +  
+  theme_minimal() +
+  plot_themePub +
+  theme(legend.position = "none") +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    )
+  )
+
+boxplotSO42_RDSI
+```
+
+### Shared Legend
+```{r}
+legendPlot <- dfIndex_long %>%
+  ggplot(aes(x = Score, y = SO42, fill = IndexAbbrev, color = IndexAbbrev)) +
+  geom_boxplot(alpha = 0.9, width = 0.8) +
+  scale_fill_manual(values = indexPal) +
+  scale_color_manual(values = indexPal) +
+  labs(
+    x = "Index Score",
+    y = expression("[ "*SO[4]^{"2-"}*" ]" ~ "(µM)"),
+    fill = NULL,
+    color = NULL) +
+  scale_y_continuous(limits = c(0, NA)) +  
+  theme_minimal() +
+  plot_themePub +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    )) + 
+  theme(
+    legend.position = "bottom",
+    legend.justification = "center",  # center the legend
+    legend.box.just = "center",       # center the box
+    text = element_text(family = "Helvetica")
+  )
+legendPlot
+
+```
+
+### Combined Plot
+
+```{r}
+# Extract legend
+sharedLegend <- cowplot::get_legend(legendPlot)
+
+# Arrange 4 plots in 2x2 with spacing controlled
+grid_plot <- cowplot::plot_grid(
+  boxplotPO43_WSI, boxplotCl_OSI_RDSI,
+  boxplotFo_OSI, boxplotSO42_RDSI,
+  ncol = 2, nrow = 2,
+  rel_heights = c(1,1),
+  rel_widths  = c(1,1),
+  align = "hv",       # align horizontally and vertically
+  axis = "tblr",      # align all axes
+  labels = NULL
+)
+
+combinedPlot_AnionIndex <- cowplot::plot_grid(
+  grid_plot, sharedLegend,
+  ncol = 1,
+  rel_heights = c(1, 0.08) # adjust vertical gap between grid and legend
+)
+
+combinedPlot_AnionIndex
+
+ggsave(combinedPlot_AnionIndex, filename = "combinedPlot_AnionIndex.png", width = 6, height = 5.5, bg = "white")
+```
+

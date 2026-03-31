@@ -1,0 +1,2480 @@
+---
+title: "Data Visualization - Cell Density (AP)"
+author: "Ellie Ryan"
+date: "`r Sys.Date()`"
+output:
+   html_document:
+    theme: flatly
+    highlight: zenburn
+    toc: true
+    toc_float: true
+    toc_collapsed: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Created:** 6/30/2025
+
+**Last Modified:** 7/8/2025
+
+```{r, message=FALSE, warning=FALSE}
+# Load packages
+library(tidyverse)
+library(lubridate)
+library(stringr)
+library(kableExtra)
+library(scales)
+library(GGally)
+library(patchwork)
+library(Hmisc)
+library(reshape2)
+library(forcats)
+library(ggtext)
+```
+
+```{r}
+
+colorPal <- c(
+  "clean" = "#769a9c",
+  "red" = "#933410",
+  "green" = "#326e35"
+)
+
+algaePal<- c(
+  "clean" = "#a5bdc0",
+  "algae" = "#735a69"
+)
+
+plot_theme <- theme(
+  axis.title = element_text(size = 12, face = "bold"), # Axis labels: 12 pt, bold
+  axis.text = element_text(size = 12), # Axis text: 12 pt
+  axis.line = element_line(linewidth = 0.5),  # Thicker axis line
+  legend.position = "top", # Position legend at the top
+  legend.justification = c(0, 1), # Justify legend to top-left
+  legend.text = element_text(size = 12), # Legend text: 12 pt
+  legend.title = element_text(size = 12), 
+  plot.title = element_text(size = 14, face = "bold"),  # Adjust plot title size
+  plot.subtitle = element_text(size = 13, face = "italic"), 
+  plot.margin = margin(20, 20, 20, 20)
+)
+
+plot_theme2 <- theme(
+  axis.title = element_text(size = 12, face = "bold"), # Axis labels: 12 pt, bold
+  axis.text = element_text(size = 12), # Axis text: 12 pt
+  axis.line = element_line(linewidth = 0.5),  # Thicker axis line
+  legend.position = "top", # Position legend at the top
+  legend.justification = c(0, 1), # Justify legend to top-left
+  legend.text = element_text(size = 12), # Legend text: 12 pt
+  legend.title = element_text(size = 12), 
+  plot.title = element_text(size = 14, face = "bold"),  # Adjust plot title size
+  plot.subtitle = element_text(size = 13, face = "italic"), 
+  axis.text.x = element_text(angle = 45, hjust = 1), 
+  plot.margin = margin(20, 20, 20, 20)
+)
+
+pairsplot_theme <- theme(
+  text = element_text(size = 10),  # Adjust variable name text size
+  axis.text = element_text(size = 8),  # Adjust axis text size
+  plot.title = element_text(size = 12, face = "bold"),  # Adjust plot title size
+  legend.text = element_text(size = 12))  # Adjust legend text size
+```
+
+# Overview
+The purpose of this `.Rmd` is to visualize cell density by site and color within the Antarctic Peninsula, and obtain basic summary statistics associated with cell density in order to inform my next steps in analysis. Before proceeding, This dataset exclusively features samples collected from the Antarctic Peninsula. These observations are broken down by `Color`, or the apparent snow color at time of sample collection. To keep things simple, there are only three levels to the `Color` category: red, green and clean. The breakdown of samples collected are as follows:
+
+-   Antarctic Peninsula:
+    -   84 samples
+        -   33 red
+        -   33 green
+        -   18 clean
+        
+From outlier analysis conducted using figures generated in the first run-through of this script, the following outliers were identified for removal:
+
+-   2025-02-19-SI-algae3
+-   2025-02-24-DA-algae2
+-   2025-02-24-DA-algae6
+-   2025-03-07-NH-algae3
+
+See the Thesis Figures (Preliminary) doc for justification for removal of each.
+
+Based on the results from the cell density analysis for all sites, it seems as though cell density and biovolume concentration are closely related. I will proceed by calculating figures for both, but am going to only focus on biovolume in leiu of biovolume and cell length for this analysis and from this point forward. 
+
+## Data Wrangling
+
+```{r}
+df <- read.csv("CompiledData.csv")
+str(df)
+```
+
+```{r}
+# Format date column 
+df <- df %>%
+  mutate(
+    Date = as.Date(Date, format = "%m/%d/%y")) %>% 
+  filter(Location == "Antarctic Peninsula")
+```
+
+```{r}
+str(df)
+```
+
+```{r}
+outliers <- c(
+  "2025-02-19-SI-algae3",
+  "2025-02-24-DA-algae2",
+  "2025-02-24-DA-algae6",
+  "2025-03-07-NH-algae3")
+
+df <- df %>% 
+  filter(!SampleID %in% outliers)
+```
+
+### Cell Density/Biovolume Comparison
+
+Below, I calculate biovolume and total cellular biovolume and store these values in `dfBio` in order to compare these metrics with cell density and use biovolume in place of cell length. 
+
+**Biovolume:** This represents the volume of each cell, assuming a spherical shape for snow algae (µm^3^ or mm^3^). This method was first categorized by Hillebrand et al., 1999, *Biovolume Calculation for Pelagic and Benthic Microalgae*. The equation is as follows:
+
+-   V~bio~ = 4/3πr^3^
+
+**Total Biovolume:** This represents the total volume of cells per unit volume of sample, or biovolume density (µm^3^/ml or mm^3^/ml). The equation is as follows:
+
+-   TV~bio~ = V~bio~ \* cells/ml
+
+```{r}
+dfBio <- df %>% 
+  select(c("SampleID", "Date", "Location", "Site", "SiteLat", "Color", "CellDensity", "CellLength", Fo:SO42 )) %>% 
+  mutate(Algae = case_when(
+    Color %in% c("red", "green") ~ "algae",
+    Color == "clean" ~ 'clean'
+  )) %>% 
+  mutate(NO2NO3 = NO2 + NO3) %>% 
+  relocate(Algae, .after = Color)%>% 
+  select(-NO2, -NO3)
+  
+dfBio <- dfBio %>% 
+  mutate(
+    # Calulate biovolume (µm^3)
+    Biovolume = (pi/6)*(CellLength^3),
+    # Calculate total biovolume concentration (µm^3/mL)
+    TotalBiovolume = Biovolume * CellDensity 
+  ) %>% 
+  relocate(Biovolume, .after = CellLength) %>% 
+  relocate(TotalBiovolume, .after = CellDensity)
+
+# Create a new factor combining Site and Date, ordered by SiteLat and Date
+dfBio <- dfBio %>%
+  mutate(SiteDate = paste(Site, Date, sep = " - ")) %>%
+  arrange(SiteLat, Date) %>%
+  mutate(SiteDate = factor(SiteDate, levels = unique(SiteDate)))%>% 
+  relocate(SiteDate, .after = Site)
+```
+
+
+I am also going to make another dataframe, `dfIndex`, that includes the index scores for the wildlife, rock, and oceanic indices. I will use this df to see if there are any trends in cell density/biovolume and index scores, as well as to see whether any trends between anion concentration and cell density/biovolume pop out when grouped by index score. 
+
+```{r}
+df2 <- read.csv("CompiledDataAp_Indices.csv")
+
+df2 <- df2 %>%
+  mutate(Date = as.Date(Date, format = "%m/%d/%y"))
+
+df2 <- df2 %>% 
+  filter(!SampleID %in% outliers)
+
+dfIndex <- df2 %>% 
+  mutate(Algae = case_when(
+    Color %in% c("red", "green") ~ "algae",
+    Color == "clean" ~ 'clean'
+  )) %>% 
+  mutate(NO2NO3 = NO2 + NO3) %>% 
+  relocate(Algae, .after = Color) %>% 
+  relocate(NO2NO3, .after = SO42) %>% 
+  select(-NO2, -NO3)
+  
+dfIndex <- dfIndex %>% 
+  mutate(
+    # Calulate biovolume (µm^3)
+    Biovolume = (pi/6)*(CellLength^3),
+    # Calculate total biovolume concentration (µm^3/mL)
+    TotalBiovolume = Biovolume * CellDensity 
+  ) %>% 
+  relocate(Biovolume, .after = CellLength) %>% 
+  relocate(TotalBiovolume, .after = CellDensity)
+
+# Create a new factor combining Site and Date, ordered by SiteLat and Date
+dfIndex <- dfIndex %>%
+  mutate(SiteDate = paste(Site, Date, sep = " - ")) %>%
+  mutate(SiteDate = factor(SiteDate, levels = unique(SiteDate)))%>% 
+  relocate(SiteDate, .after = Site)
+
+# Group sites by location along the Peninsula
+dfIndex <- dfIndex %>% 
+  mutate(SiteLoc = case_when(
+    Site %in% c("Horseshoe Island", "Stonington Island") ~ "South",
+    Site %in% c("Pléneau Island", "Damoy Point") ~ "South Central",
+    Site %in% c("Neko Harbour", "Danco Island", "Orne Harbour") ~ "North Central", 
+    Site %in% c("Pendulum Cove, Deception Island") ~ "North",
+  )) %>% 
+  relocate(SiteLoc, .after = Site)
+```
+
+# Summary Statistics {.tabset}
+Similar to the cell density analysis for all sites, I am going to create summary tables that depict summary stats for cell density by snow color in the AP samples. I will also compare by site. 
+
+## Cell Density (Color)
+
+Below is a summary stats table for cell density, grouped by `Color`. The `all` level of the `Color` classification includes red, green and clean snow observations.
+
+```{r}
+# Cell Density 
+dfCSummary <- dfBio %>% 
+  group_by(Color) %>% 
+  summarise(
+    n = n(),
+    mean = comma(round(mean(CellDensity, na.rm = TRUE))),
+    median = comma(round(median(CellDensity, na.rm = TRUE))),
+    max = comma(max(CellDensity, na.rm = TRUE)),
+    min = comma(min(CellDensity, na.rm = TRUE)),
+    sd = comma(round(sd(CellDensity, na.rm = TRUE))),
+    .groups = "drop")
+
+# Add "All" for each site 
+dfCSummaryAll <- dfBio %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    mean = comma(round(mean(CellDensity, na.rm = TRUE))),
+    median = comma(round(median(CellDensity, na.rm = TRUE))),
+    max = comma(max(CellDensity, na.rm = TRUE)),
+    min = comma(min(CellDensity, na.rm = TRUE)),
+    sd = comma(round(sd(CellDensity, na.rm = TRUE))),
+    .groups = "drop"
+  )
+
+# Combine 
+dfCSummary <- bind_rows(dfCSummaryAll, dfCSummary) %>% 
+  arrange(match(Color, c("green", "red", "clean", "all")))
+
+# Format table using kableExtra
+dfCSummary %>% 
+  kable("html", caption = "Summary Statistics for Cell Density by Snow Color in the Antarctic Peninsula (cells/mL) ", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+## Cell Density (Color & Site)
+
+Below is a summary stats table for cell density, grouped by `Color` and sampling site. The `all` level of the `Color` classification includes red, green and clean snow observations.
+
+```{r}
+# Cell Density 
+dfCSummarySite <- dfBio %>% 
+  group_by(Color, Site) %>% 
+  summarise(
+    n = n(),
+    mean = comma(round(mean(CellDensity, na.rm = TRUE))),
+    median = comma(round(median(CellDensity, na.rm = TRUE))),
+    max = comma(max(CellDensity, na.rm = TRUE)),
+    min = comma(min(CellDensity, na.rm = TRUE)),
+    sd = comma(round(sd(CellDensity, na.rm = TRUE))),
+    .groups = "drop")
+
+# Add "All" for each site 
+dfCSummaryAllSite <- dfBio %>% 
+  group_by(Site) %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    mean = comma(round(mean(CellDensity, na.rm = TRUE))),
+    median = comma(round(median(CellDensity, na.rm = TRUE))),
+    max = comma(max(CellDensity, na.rm = TRUE)),
+    min = comma(min(CellDensity, na.rm = TRUE)),
+    sd = comma(round(sd(CellDensity, na.rm = TRUE))),
+    .groups = "drop"
+  )
+
+# Combine 
+dfCSummarySite <- bind_rows(dfCSummarySite, dfCSummaryAllSite) %>% 
+  arrange(Site, match(Color, c("green", "red", "clean", "all")))
+
+# Format table using kableExtra
+dfCSummarySite %>% 
+  kable("html", caption = "Summary Statistics for Cell Density by Snow Color at Each Sampling Location in the Antarctic Peninsula (cells/mL) ", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+
+## Biovolume Concentration (Color)
+
+Below is a summary stats table for biovolume concentration, grouped by `Color`. The `all` level of the `Color` classification includes red, green and clean snow observations.
+
+```{r}
+# Total Biovolume 
+dfCSummaryTotBio <- dfBio %>% 
+  group_by(Color) %>% 
+  summarise(
+    n = n(),
+    mean = scientific(round(mean(TotalBiovolume, na.rm = TRUE))),
+    median = scientific(round(median(TotalBiovolume, na.rm = TRUE))),
+    max = scientific(max(TotalBiovolume, na.rm = TRUE)),
+    min = scientific(min(TotalBiovolume, na.rm = TRUE)),
+    sd = scientific(round(sd(TotalBiovolume, na.rm = TRUE))),
+    .groups = "drop")
+
+# Add "All" for each site 
+dfCSummaryTotBioAll <- dfBio %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    mean = scientific(round(mean(TotalBiovolume, na.rm = TRUE))),
+    median = scientific(round(median(TotalBiovolume, na.rm = TRUE))),
+    max = scientific(max(TotalBiovolume, na.rm = TRUE)),
+    min = scientific(min(TotalBiovolume, na.rm = TRUE)),
+    sd = scientific(round(sd(TotalBiovolume, na.rm = TRUE))),
+    .groups = "drop"
+  )
+
+# Combine 
+dfCSummaryTotBio <- bind_rows(dfCSummaryTotBioAll, dfCSummaryTotBio) %>% 
+  arrange(match(Color, c("green", "red", "clean", "all")))
+
+# Format table using kableExtra
+dfCSummaryTotBio %>% 
+  kable("html", caption = "Summary Statistics for Cell Biovolume Concentration by Snow Color in the Antarctic Peninsula (um^3/mL)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+## Biovolume Concentration (Color & Site)
+
+Below is a summary stats table for cell density, grouped by `Color` and sampling site. The `all` level of the `Color` classification includes red, green and clean snow observations.
+
+```{r}
+# Total Biovolume 
+dfCSummaryTotBioSite <- dfBio %>% 
+  group_by(Color, Site) %>% 
+  summarise(
+    n = n(),
+    mean = scientific(round(mean(TotalBiovolume, na.rm = TRUE))),
+    median = scientific(round(median(TotalBiovolume, na.rm = TRUE))),
+    max = scientific(max(TotalBiovolume, na.rm = TRUE)),
+    min = scientific(min(TotalBiovolume, na.rm = TRUE)),
+    sd = scientific(round(sd(TotalBiovolume, na.rm = TRUE))),
+    .groups = "drop")
+
+# Add "All" for each site 
+dfCSummaryTotBioAllSite <- dfBio %>% 
+  group_by(Site) %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    mean = scientific(round(mean(TotalBiovolume, na.rm = TRUE))),
+    median = scientific(round(median(TotalBiovolume, na.rm = TRUE))),
+    max = scientific(max(TotalBiovolume, na.rm = TRUE)),
+    min = scientific(min(TotalBiovolume, na.rm = TRUE)),
+    sd = scientific(round(sd(TotalBiovolume, na.rm = TRUE))),
+    .groups = "drop"
+  )
+
+# Combine 
+dfCSummaryTotBioSite <- bind_rows(dfCSummaryTotBioSite, dfCSummaryTotBioAllSite) %>% 
+  arrange(Site, match(Color, c("green", "red", "clean", "all")))
+
+# Format table using kableExtra
+dfCSummaryTotBioSite %>% 
+  kable("html", caption = "Summary Statistics for Cell Biovolume Concentration at Each Sampling Location in the Antarctic Peninsula (um^3/mL)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+## Cell Biovolume (Color)
+
+Below is a summary stats table for cell biovolume, grouped by `Color`. The `all` level of the `Color` classification includes red, green and clean snow observations.
+
+```{r}
+# Cell Density 
+dfLSummary <- dfBio %>% 
+  group_by(Color) %>% 
+  summarise(
+    n = n(),
+    mean = comma(round(mean(Biovolume, na.rm = TRUE))),
+    median = comma(round(median(Biovolume, na.rm = TRUE))),
+    max = comma(max(Biovolume, na.rm = TRUE)),
+    min = comma(min(Biovolume, na.rm = TRUE)),
+    sd = comma(round(sd(Biovolume, na.rm = TRUE))),
+    .groups = "drop")
+
+# Add "All" for each site 
+dfLSummaryAll <- dfBio %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    mean = comma(round(mean(Biovolume, na.rm = TRUE))),
+    median = comma(round(median(Biovolume, na.rm = TRUE))),
+    max = comma(max(Biovolume, na.rm = TRUE)),
+    min = comma(min(Biovolume, na.rm = TRUE)),
+    sd = comma(round(sd(Biovolume, na.rm = TRUE))),
+    .groups = "drop"
+  )
+
+# Combine 
+dfLSummary <- bind_rows(dfLSummaryAll, dfLSummary) %>% 
+  arrange(match(Color, c("green", "red", "clean", "all")))
+
+# Format table using kableExtra
+dfLSummary %>% 
+  kable("html", caption = "Summary Statistics for Cell Biovolume by Snow Color in the Antarctic Peninsula (µm^3) ", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+## Cell Biovolume (Color & Site)
+
+Below is a summary stats table for cell biovolume, grouped by `Color` and sampling site. The `all` level of the `Color` classification includes red, green and clean snow observations.
+
+```{r}
+# Cell Biovolume
+dfLSummarySite <- dfBio %>% 
+  group_by(Color, Site) %>% 
+  summarise(
+    n = n(),
+    mean = comma(round(mean(Biovolume, na.rm = TRUE))),
+    median = comma(round(median(Biovolume, na.rm = TRUE))),
+    max = comma(max(Biovolume, na.rm = TRUE)),
+    min = comma(min(Biovolume, na.rm = TRUE)),
+    sd = comma(round(sd(Biovolume, na.rm = TRUE))),
+    .groups = "drop")
+
+# Add "All" for each site 
+dfLSummaryAllSite <- dfBio %>% 
+  group_by(Site) %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    mean = comma(round(mean(Biovolume, na.rm = TRUE))),
+    median = comma(round(median(Biovolume, na.rm = TRUE))),
+    max = comma(max(Biovolume, na.rm = TRUE)),
+    min = comma(min(Biovolume, na.rm = TRUE)),
+    sd = comma(round(sd(Biovolume, na.rm = TRUE))),
+    .groups = "drop"
+  )
+
+# Combine 
+dfLSummarySite <- bind_rows(dfLSummarySite, dfLSummaryAllSite) %>% 
+  arrange(Site, match(Color, c("green", "red", "clean", "all")))
+
+# Format table using kableExtra
+dfLSummarySite %>% 
+  kable("html", caption = "Summary Statistics for Cell Biovolume by Snow Color at Each Sampling Location in the Antarctic Peninsula (µm^3) ", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+# Box Plots 
+
+## Cell Density {.tabset}
+
+### Cell Density (Color)
+
+```{r}
+boxplotDensity <- dfBio %>%
+  ggplot(aes(x = Color, y = CellDensity, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Cell Density (cells/mL)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme + 
+  theme(legend.position = "none")
+
+boxplotDensity
+
+ggsave(boxplotDensity, filename = "boxplotDensity.png", width = 6, height = 4, bg = "white")
+```
+
+### Cell Density (Site & Color)
+
+```{r}
+boxplotDensitySite <- dfBio %>%
+  mutate(Site = fct_reorder(Site, SiteLat)) %>% 
+  ggplot(aes(x = Site, y = CellDensity, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Cell Density (cells/mL)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotDensitySite
+
+ggsave(boxplotDensitySite, filename = "boxplotDensitySiteLat.png", width = 7, height = 6, bg = "white")
+```
+
+### Cell Density (Site & Date) {.tabset}
+
+#### Pléneau Island
+```{r}
+boxplotDensityDatePLI <- dfBio %>%
+  filter(Site == "Pléneau Island") %>% 
+  mutate(Date = factor(Date)) %>% 
+  ggplot(aes(x = Date, y = CellDensity, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Cell Density (cells/mL)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotDensityDatePLI
+
+ggsave(boxplotDensityDatePLI, filename = "boxplotDensityDatePLI.png", width = 7, height = 6, bg = "white")
+```
+
+#### Neko Harbour
+```{r}
+boxplotDensityDateNH <- dfBio %>%
+  filter(Site == "Neko Harbour") %>% 
+  mutate(Date = factor(Date)) %>% 
+  ggplot(aes(x = Date, y = CellDensity, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Cell Density (cells/mL)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotDensityDateNH
+
+ggsave(boxplotDensityDateNH, filename = "boxplotDensityDateNH.png", width = 7, height = 6, bg = "white")
+```
+
+#### Damoy Point
+```{r}
+boxplotDensityDateDP <- dfBio %>%
+  filter(Site == "Damoy Point") %>% 
+  mutate(Date = factor(Date)) %>% 
+  ggplot(aes(x = Date, y = CellDensity, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Cell Density (cells/mL)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotDensityDateDP
+
+ggsave(boxplotDensityDateDP, filename = "boxplotDensityDateDP.png", width = 7, height = 6, bg = "white")
+```
+
+#### Orne Harbour
+```{r}
+boxplotDensityDateOH <- dfBio %>%
+  filter(Site == "Orne Harbour") %>% 
+  mutate(Date = factor(Date)) %>% 
+  ggplot(aes(x = Date, y = CellDensity, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Cell Density (cells/mL)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotDensityDateOH
+
+ggsave(boxplotDensityDateOH, filename = "boxplotDensityDateOH.png", width = 7, height = 6, bg = "white")
+```
+
+## Biovolume Concentration {.tabset}
+
+### Biovolume Concentration (Color)
+
+```{r}
+boxplotTotBio <- dfBio %>%
+  ggplot(aes(x = Color, y = TotalBiovolume, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Cell Biovolume Concentration (µm^3/mL)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme + 
+  theme(legend.position = "none")
+
+boxplotTotBio
+
+ggsave(boxplotTotBio, filename = "boxplotTotBio.png", width = 6, height = 4, bg = "white")
+```
+
+### Biovolume Concentration (Site & Color)
+
+```{r}
+boxplotTotBioSite <- dfBio %>%
+  mutate(Site = fct_reorder(Site, SiteLat)) %>% 
+  ggplot(aes(x = Site, y = TotalBiovolume, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Cell Biovolume Concentration (µm^3/mL)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotTotBioSite
+
+ggsave(boxplotTotBioSite, filename = "boxplotTotBioSiteLat.png", width = 7, height = 6, bg = "white")
+```
+
+### Biovolume Concentration (Site & Date) {.tabset}
+
+#### Pléneau Island
+```{r}
+boxplotTotBioDatePLI <- dfBio %>%
+  filter(Site == "Pléneau Island") %>% 
+  mutate(Date = factor(Date)) %>% 
+  ggplot(aes(x = Date, y = TotalBiovolume, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Biovolume Concentration (µm^3/mL)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotTotBioDatePLI
+
+ggsave(boxplotTotBioDatePLI, filename = "boxplotTotBioDatePLI.png", width = 7, height = 6, bg = "white")
+```
+
+#### Neko Harbour
+```{r}
+boxplotTotBioDateNH <- dfBio %>%
+  filter(Site == "Neko Harbour") %>% 
+  mutate(Date = factor(Date)) %>% 
+  ggplot(aes(x = Date, y = TotalBiovolume, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Biovolume Concentration (µm^3/mL)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotTotBioDateNH
+
+ggsave(boxplotTotBioDateNH, filename = "boxplotTotBioDateNH.png", width = 7, height = 6, bg = "white")
+```
+
+#### Damoy Point
+```{r}
+boxplotTotBioDateDP <- dfBio %>%
+  filter(Site == "Damoy Point") %>% 
+  mutate(Date = factor(Date)) %>% 
+  ggplot(aes(x = Date, y = TotalBiovolume, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Biovolume Concentration (µm^3/mL)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotTotBioDateDP
+
+ggsave(boxplotTotBioDateDP, filename = "boxplotTotBioDateDP.png", width = 7, height = 6, bg = "white")
+```
+
+#### Orne Harbour
+```{r}
+boxplotTotBioDateOH <- dfBio %>%
+  filter(Site == "Orne Harbour") %>% 
+  mutate(Date = factor(Date)) %>% 
+  ggplot(aes(x = Date, y = TotalBiovolume, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Biovolume Concentration (µm^3/mL)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotTotBioDateOH
+
+ggsave(boxplotTotBioDateOH, filename = "boxplotTotBioDateOH.png", width = 7, height = 6, bg = "white")
+```
+
+## Biovolume {.tabset}
+
+### Biovolume (Color)
+
+```{r}
+boxplotBio <- dfBio %>%
+  ggplot(aes(x = Color, y = Biovolume, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Cell Biovolume (µm^3)",
+    fill = NULL,
+    color = NULL
+  ) +
+  theme_minimal() +
+  plot_theme + 
+  theme(legend.position = "none")
+
+boxplotBio
+
+ggsave(boxplotBio, filename = "boxplotBio.png", width = 6, height = 4, bg = "white")
+```
+
+### Biovolume (Site & Color)
+
+```{r}
+boxplotBioSite <- dfBio %>%
+  mutate(Site = fct_reorder(Site, SiteLat)) %>% 
+  ggplot(aes(x = Site, y = Biovolume, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Cell Biovolume (µm^3)",
+    fill = NULL,
+    color = NULL
+  ) +
+  theme_minimal() +
+  plot_theme2
+
+boxplotBioSite
+
+ggsave(boxplotBioSite, filename = "boxplotBioSiteLat.png", width = 7, height = 6, bg = "white")
+```
+
+
+### Biovolume (Site & Date) {.tabset}
+
+#### Pléneau Island
+```{r}
+boxplotBioDatePLI <- dfBio %>%
+  filter(Site == "Pléneau Island") %>% 
+  mutate(Date = factor(Date)) %>% 
+  ggplot(aes(x = Date, y = Biovolume, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Cell Biovolume (µm^3)",
+    fill = NULL,
+    color = NULL
+  ) +
+  theme_minimal() +
+  plot_theme2
+
+boxplotBioDatePLI
+
+ggsave(boxplotBioDatePLI, filename = "boxplotBioDatePLI.png", width = 7, height = 6, bg = "white")
+```
+
+```{r}
+boxplotPLI <- (boxplotDensityDatePLI | boxplotTotBioDatePLI | boxplotBioDatePLI) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom")
+
+boxplotPLI
+
+ggsave(boxplotPLI, filename = "boxplotPLI.png", width = 9, height = 4.5, bg = "white")
+```
+
+
+#### Neko Harbour
+```{r}
+boxplotBioDateNH <- dfBio %>%
+  filter(Site == "Neko Harbour") %>% 
+  mutate(Date = factor(Date)) %>% 
+  ggplot(aes(x = Date, y = Biovolume, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Cell Biovolume (µm^3)",
+    fill = NULL,
+    color = NULL
+  ) +
+  theme_minimal() +
+  plot_theme2
+
+boxplotBioDateNH
+
+ggsave(boxplotBioDateNH, filename = "boxplotBioDateNH.png", width = 7, height = 6, bg = "white")
+```
+
+```{r}
+boxplotNH <- (boxplotDensityDateNH | boxplotTotBioDateNH | boxplotBioDateNH) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom")
+
+boxplotNH
+
+ggsave(boxplotNH, filename = "boxplotNH.png", width = 9, height = 4.5, bg = "white")
+```
+
+#### Damoy Point
+```{r}
+boxplotBioDateDP <- dfBio %>%
+  filter(Site == "Damoy Point") %>% 
+  mutate(Date = factor(Date)) %>% 
+  ggplot(aes(x = Date, y = Biovolume, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Cell Biovolume (µm^3)",
+    fill = NULL,
+    color = NULL
+  ) +
+  theme_minimal() +
+  plot_theme2
+
+boxplotBioDateDP
+
+ggsave(boxplotBioDateDP, filename = "boxplotBioDateDP.png", width = 7, height = 6, bg = "white")
+```
+
+```{r}
+boxplotDP <- (boxplotDensityDateDP | boxplotTotBioDateDP | boxplotBioDateDP) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom")
+
+boxplotDP
+
+ggsave(boxplotDP, filename = "boxplotDP.png", width = 9, height = 4.5, bg = "white")
+```
+
+#### Orne Harbour
+```{r}
+boxplotBioDateOH <- dfBio %>%
+  filter(Site == "Orne Harbour") %>% 
+  mutate(Date = factor(Date)) %>% 
+  ggplot(aes(x = Date, y = Biovolume, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Cell Biovolume (µm^3)",
+    fill = NULL,
+    color = NULL
+  ) +
+  theme_minimal() +
+  plot_theme2
+
+boxplotBioDateOH
+
+ggsave(boxplotBioDateOH, filename = "boxplotBioDateOH.png", width = 7, height = 6, bg = "white")
+```
+
+```{r}
+boxplotOH <- (boxplotDensityDateOH | boxplotTotBioDateOH | boxplotBioDateOH) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom")
+
+boxplotOH
+
+ggsave(boxplotOH, filename = "boxplotOH.png", width = 9, height = 4.5, bg = "white")
+```
+
+## Cell Density & Indices {.tabset}
+
+### Wildlife Scoring Index
+```{r}
+boxplotDensityWildIndex <- dfIndex %>%
+  mutate(WildlifeScoringIndex = factor(WildlifeScoringIndex)) %>% 
+  ggplot(aes(x = WildlifeScoringIndex, y = CellDensity, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Cell Density (cells/mL)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotDensityWildIndex
+
+ggsave(boxplotDensityWildIndex, filename = "boxplotDensityWildIndex.png", width = 6, height = 4, bg = "white")
+```
+
+### Rocks Index
+```{r}
+boxplotDensityRockIndex <- dfIndex %>%
+  mutate(RocksDustScoringIndex = factor(RocksDustScoringIndex)) %>% 
+  ggplot(aes(x = RocksDustScoringIndex, y = CellDensity, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Cell Density (cells/mL)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotDensityRockIndex
+
+ggsave(boxplotDensityRockIndex, filename = "boxplotDensityRockIndex.png", width = 6, height = 4, bg = "white")
+```
+
+### Oceanic Influence Index
+```{r}
+boxplotDensityOceanIndex <- dfIndex %>%
+  mutate(OceanicInfluenceScoringIndex = factor(OceanicInfluenceScoringIndex)) %>% 
+  ggplot(aes(x = OceanicInfluenceScoringIndex, y = CellDensity, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Cell Density (cells/mL)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotDensityOceanIndex
+
+ggsave(boxplotDensityOceanIndex, filename = "boxplotDensityOceanIndex.png", width = 6, height = 4, bg = "white")
+```
+
+## Biovolume Concentration & Indices {.tabset}
+
+### Wildlife Scoring Index
+```{r}
+boxplotTotBioWildIndex <- dfIndex %>%
+  mutate(WildlifeScoringIndex = factor(WildlifeScoringIndex)) %>% 
+  ggplot(aes(x = WildlifeScoringIndex, y = TotalBiovolume, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Biovolume Concentration (µm^3/mL)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotTotBioWildIndex
+
+ggsave(boxplotTotBioWildIndex, filename = "boxplotTotBioWildIndex.png", width = 6, height = 4, bg = "white")
+```
+
+### Rocks Index
+```{r}
+boxplotTotBioRockIndex <- dfIndex %>%
+  mutate(RocksDustScoringIndex = factor(RocksDustScoringIndex)) %>% 
+  ggplot(aes(x = RocksDustScoringIndex, y = TotalBiovolume, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Biovolume Concentration (µm^3/mL)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotTotBioRockIndex
+
+ggsave(boxplotTotBioRockIndex, filename = "boxplotTotBioRockIndex.png", width = 6, height = 4, bg = "white")
+```
+
+### Oceanic Influence Index
+```{r}
+boxplotTotBioOceanIndex <- dfIndex %>%
+  mutate(OceanicInfluenceScoringIndex = factor(OceanicInfluenceScoringIndex)) %>% 
+  ggplot(aes(x = OceanicInfluenceScoringIndex, y = TotalBiovolume, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Biovolume Concentration (µm^3/mL)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotTotBioOceanIndex
+
+ggsave(boxplotTotBioOceanIndex, filename = "boxplotTotBioOceanIndex.png", width = 6, height = 4, bg = "white")
+```
+
+
+## Biovolume & Indices {.tabset}
+
+### Wildlife Scoring Index
+```{r}
+boxplotBioWildIndex <- dfIndex %>%
+  mutate(WildlifeScoringIndex = factor(WildlifeScoringIndex)) %>% 
+  ggplot(aes(x = WildlifeScoringIndex, y = Biovolume, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Biovolume (µm^3)",
+    fill = NULL,
+    color = NULL
+  ) +
+  theme_minimal() +
+  plot_theme
+
+boxplotBioWildIndex
+
+ggsave(boxplotBioWildIndex, filename = "boxplotBioWildIndex.png", width = width = 6, height = 4, bg = "white")
+```
+
+### Rocks Index
+```{r}
+boxplotBioRockIndex <- dfIndex %>%
+  mutate(RocksDustScoringIndex = factor(RocksDustScoringIndex)) %>% 
+  ggplot(aes(x = RocksDustScoringIndex, y = Biovolume, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Biovolume (µm^3)",
+    fill = NULL,
+    color = NULL
+  ) +
+  theme_minimal() +
+  plot_theme
+
+boxplotBioRockIndex
+
+ggsave(boxplotBioRockIndex, filename = "boxplotBioRockIndex.png", width = width = 6, height = 4, bg = "white")
+```
+
+### Oceanic Influence Index
+```{r}
+boxplotBioOceanIndex <- dfIndex %>%
+  mutate(OceanicInfluenceScoringIndex = factor(OceanicInfluenceScoringIndex)) %>% 
+  ggplot(aes(x = OceanicInfluenceScoringIndex, y = Biovolume, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.85, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Biovolume (µm^3)",
+    fill = NULL,
+    color = NULL
+  ) +
+  theme_minimal() +
+  plot_theme
+
+boxplotBioOceanIndex
+
+ggsave(boxplotBioOceanIndex, filename = "boxplotBioOceanIndex.png",  width = 6, height = 4, bg = "white")
+```
+
+
+## Combined Figures {.tabset}
+
+### Wildlife Scoring Index
+```{r}
+boxplotWildIndex <- (
+  (boxplotDensityWildIndex | boxplotTotBioWildIndex) / 
+   boxplotBioWildIndex
+) + 
+  plot_layout(guides = "collect") & 
+  theme(legend.position = "bottom")
+
+boxplotWildIndex
+
+ggsave(boxplotWildIndex, filename = "boxplotWildIndex.png", width = 9, height = 8, bg = "white")
+```
+
+### Rocks Index
+```{r}
+boxplotRockIndex <- (
+  (boxplotDensityRockIndex | boxplotTotBioRockIndex) / 
+   boxplotBioRockIndex
+) + 
+  plot_layout(guides = "collect") & 
+  theme(legend.position = "bottom")
+
+boxplotRockIndex
+
+ggsave(boxplotRockIndex, filename = "boxplotRockIndex.png", width = 9, height = 8, bg = "white")
+```
+
+### Oceanic Influence Index
+```{r}
+boxplotOceanIndex <- (
+  (boxplotDensityOceanIndex | boxplotTotBioOceanIndex) / 
+   boxplotBioOceanIndex
+) + 
+  plot_layout(guides = "collect") & 
+  theme(legend.position = "bottom")
+
+boxplotOceanIndex
+
+ggsave(boxplotOceanIndex, filename = "boxplotOceanIndex.png", width = 9, height = 8, bg = "white")
+```
+
+# Algal Properties by Latitude {.tabset}
+Below are scatterplots of the relationship between latitude and cell density, total biovolume concentration and cell biovolume. 
+
+## Cell Density
+```{r}
+scatterLatDensity <- dfIndex %>% 
+  ggplot(aes(x = Latitude, y = CellDensity, fill = Color, color = Color)) +
+  geom_point(alpha = 0.8, 
+             shape = 21, 
+             size = 3) + 
+  geom_smooth(method = "lm") +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Cell Density (cells/mL)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+scatterLatDensity
+```
+
+## Biovolume Concentration 
+```{r}
+scatterLatTotBio <- dfIndex %>% 
+  ggplot(aes(x = Latitude, y = TotalBiovolume, fill = Color, color = Color)) +
+  geom_point(alpha = 0.8, 
+             shape = 21, 
+             size = 3) + 
+  geom_smooth(method = "lm") +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Biovolume Concentration (µm^3/mL)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+scatterLatTotBio
+```
+
+## Biovolume 
+```{r}
+scatterLatBio <- dfIndex %>% 
+  ggplot(aes(x = Latitude, y = Biovolume, fill = Color, color = Color)) +
+  geom_point(alpha = 0.8, 
+             shape = 21, 
+             size = 3) + 
+  geom_smooth(method = "lm") +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Biovolume (µm^3)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+scatterLatBio
+```
+
+# Anion Scatter Plots {.tabset}
+In this section, I will assess the relationship between cell density and each anion, colored by algae presence and faceted by site, to see whether algae/anion relationships differ between locations or if there are any trends that jump out at me. I will do the same for biovolume concentration to see if it differs from cell density. 
+
+## All Sites (Cell Density)
+
+```{r}
+dfCAnion_long <- dfBio %>% 
+  pivot_longer(cols = c(Fo, Cl, SO42, PO43, NO2NO3),
+               names_to = "Anion",
+               values_to = "Concentration")
+
+scatterMatrix <- dfCAnion_long %>% 
+  ggplot(aes(x = Concentration, y = CellDensity)) +
+  geom_point(aes(color = Color), alpha = 0.6) +  
+  geom_smooth(method = "lm", color = "tomato", linewidth = 0.5, alpha = 0.5, se = FALSE) +  
+  scale_color_manual(values = colorPal) +
+  scale_y_sqrt() + 
+  scale_x_sqrt() +
+  facet_grid(Site ~ Anion, scales = "free_x", labeller = label_wrap_gen(width = 10)) + 
+  theme_minimal() + 
+  plot_theme2 + 
+  theme(axis.text = element_text(size = 10)) + 
+  labs(x = "Anion Concentration (ppm)",
+       y = "Cell Density (cells/mL)",
+       color = NULL)
+
+scatterMatrix + 
+  theme(strip.text.y = element_text(angle = 0, size = 9),
+        axis.text.y = element_text(size = 8))
+
+ggsave(scatterMatrix, filename = "scatterMatrix.png", width = 8, height = 9, bg = "white")
+```
+
+## All Sites (Biovolume Concentration)
+
+```{r}
+ScatterMatrixTotBio <- dfCAnion_long %>% 
+  ggplot(aes(x = Concentration, y = TotalBiovolume)) +
+  geom_point(aes(color = Color),alpha = 0.6) + 
+  geom_smooth(method = "lm", color = "tomato", linewidth = 0.5, alpha = 0.5, se = FALSE) +  
+  scale_color_manual(values = colorPal) +
+  scale_y_sqrt() + 
+  scale_x_sqrt() +
+  facet_grid(Site ~ Anion, scales = "free_x", labeller = label_wrap_gen(width = 10)) + 
+  theme_minimal() + 
+  plot_theme2 + 
+  theme(axis.text = element_text(size = 10)) + 
+  labs(x = "Anion Concentration (ppm)",
+       y = "Cell Biovolume Concentration (µm^3/mL)",
+       color = NULL)
+
+ScatterMatrixTotBio + 
+  theme(strip.text.y = element_text(angle = 0, size = 9),
+        axis.text.y = element_text(size = 8))
+
+ggsave(ScatterMatrixTotBio, filename = "ScatterMatrixTotBio.png", width = 8, height = 9, bg = "white")
+```
+
+## All Sites (Biovolume)
+
+```{r}
+ScatterMatrixBio <- dfCAnion_long %>% 
+  ggplot(aes(x = Concentration, y = Biovolume)) +
+  geom_point(aes(color = Color), alpha = 0.6) + 
+  geom_smooth(method = "lm", color = "tomato", linewidth = 0.5, alpha = 0.5, se = FALSE) +  
+  scale_color_manual(values = colorPal) +
+  scale_y_sqrt() + 
+  scale_x_sqrt() +
+  facet_grid(Site ~ Anion, scales = "free_x", labeller = label_wrap_gen(width = 10)) + 
+  theme_minimal() + 
+  plot_theme2 + 
+  theme(axis.text = element_text(size = 10)) + 
+  labs(x = "Anion Concentration (ppm)",
+       y = "Cell Biovolume (µm^3)",
+       color = NULL)
+
+ScatterMatrixBio + 
+  theme(strip.text.y = element_text(angle = 0, size = 9),
+        axis.text.y = element_text(size = 8))
+
+ggsave(ScatterMatrixBio, filename = "ScatterMatrixBio.png", width = 8, height = 9, bg = "white")
+```
+
+# Heat Maps {.tabset}
+
+## Cell Density vs. Total Biovolume & Anions (by Site)
+```{r}
+# Variable groups
+algae_vars <- c("CellDensity", "TotalBiovolume")
+anion_vars <- c("Cl", "NO2NO3", "SO42", "PO43", "Fo")
+
+# Filtered data
+df_filtered <- dfBio %>%
+  filter(Site != "Pendulum Cove, Deception Island") %>% 
+  filter(Site != "Danco Island") %>% 
+  select(Site, all_of(c(algae_vars, anion_vars))) %>%
+  na.omit()
+
+# Function to extract correlations
+get_correlation_data <- function(data, location_name) {
+  cor_matrix <- rcorr(as.matrix(data[, -1]), type = "spearman")
+  
+  r_vals <- cor_matrix$r
+  p_vals <- cor_matrix$P
+
+  ## Algae vs Anion correlations
+  pairs <- expand.grid(Algae = algae_vars, Anion = anion_vars, stringsAsFactors = FALSE)
+
+  results <- pairs %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[Algae, Anion],
+      p_value = p_vals[Algae, Anion],
+      significant = p_value < 0.05,
+      label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+      Site = location_name
+    ) %>%
+    ungroup()
+
+  ## CellDensity vs TotalBiovolume correlation (the 6th column)
+  bio_pair <- tibble(
+    Algae = algae_vars,
+    Anion = "TotalBiovolume",
+    Spearman_r = r_vals["CellDensity", "TotalBiovolume"],
+    p_value = p_vals["CellDensity", "TotalBiovolume"],
+    significant = p_value < 0.05,
+    label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+    Site = location_name
+  )
+
+  ## Combine both
+  combined_results <- bind_rows(results, bio_pair)
+
+  return(combined_results)
+}
+
+
+# Apply function across all sites
+cor_results <- df_filtered %>%
+  group_split(Site) %>%
+  map_dfr(~get_correlation_data(.x, unique(.x$Site)))
+
+
+# Create combined y-axis label
+cor_results <- cor_results %>%
+  mutate(Location_Algae = paste(Site, Algae, sep = " - "))
+
+# Order the rows by site (Location), then Algae variable
+location_order <- unique(cor_results$Site)
+
+cor_results <- cor_results %>%
+  mutate(Location_Algae = factor(
+    Location_Algae,
+    levels = unlist(lapply(location_order, function(loc) {
+      c(paste(loc, "CellDensity", sep = " - "),
+        paste(loc, "TotalBiovolume", sep = " - "))
+    }))
+  ))
+
+# Order Anion axis (x-axis), adding the 6th column last
+cor_results$Anion <- factor(cor_results$Anion, levels = c(anion_vars, "TotalBiovolume"))
+
+# Plot
+spearmanPlotBio <- ggplot(cor_results, aes(x = Anion, y = Location_Algae, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = filter(cor_results, significant), 
+            color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(
+    low = "blue", mid = "white", high = "red", midpoint = 0, 
+    name = "Spearman r"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    axis.text.y = element_text(size = 9)
+  )
+
+# Save plot
+spearmanPlotBio
+ggsave(spearmanPlotBio, filename = "spearmanPlotBio.png", width = 8, height = 9, bg = "white")
+```
+
+## Cell Density vs. Total Biovolume & Anions (by SiteLoc)
+```{r}
+# Variable groups
+algae_vars <- c("CellDensity", "TotalBiovolume")
+anion_vars <- c("Cl", "NO2NO3", "SO42", "PO43", "Fo")
+
+# Filtered data by SiteLoc 
+df_filtered <- dfIndex %>%
+  filter(SiteLoc != "North") %>% 
+  select(SiteLoc, all_of(c(algae_vars, anion_vars))) %>%
+  na.omit()
+
+# Function to extract correlations
+get_correlation_data <- function(data, location_name) {
+  cor_matrix <- rcorr(as.matrix(data[, -1]), type = "spearman")
+  
+  r_vals <- cor_matrix$r
+  p_vals <- cor_matrix$P
+
+  # Algae vs Anion correlations
+  pairs <- expand.grid(Algae = algae_vars, Anion = anion_vars, stringsAsFactors = FALSE)
+
+  results <- pairs %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[Algae, Anion],
+      p_value = p_vals[Algae, Anion],
+      significant = p_value < 0.05,
+      label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+      SiteLoc = location_name
+    ) %>%
+    ungroup()
+
+  # CellDensity vs TotalBiovolume correlation
+  bio_pair <- tibble(
+    Algae = algae_vars,
+    Anion = "TotalBiovolume",
+    Spearman_r = r_vals["CellDensity", "TotalBiovolume"],
+    p_value = p_vals["CellDensity", "TotalBiovolume"],
+    significant = p_value < 0.05,
+    label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+    SiteLoc = location_name
+  )
+
+  bind_rows(results, bio_pair)
+}
+
+# Apply function across SiteLoc groups
+cor_results <- df_filtered %>%
+  group_split(SiteLoc) %>%
+  map_dfr(~get_correlation_data(.x, unique(.x$SiteLoc)))
+
+# Create combined y-axis label
+cor_results <- cor_results %>%
+  mutate(Location_Algae = paste(SiteLoc, Algae, sep = " - "))
+
+# Order the rows by SiteLoc, then Algae
+location_order <- unique(cor_results$SiteLoc)
+
+cor_results <- cor_results %>%
+  mutate(Location_Algae = factor(
+    Location_Algae,
+    levels = unlist(lapply(location_order, function(loc) {
+      c(paste(loc, "CellDensity", sep = " - "),
+        paste(loc, "TotalBiovolume", sep = " - "))
+    }))
+  ))
+
+# Order Anion axis (x-axis), adding TotalBiovolume last
+cor_results$Anion <- factor(cor_results$Anion, levels = c(anion_vars))
+
+# Plot
+spearmanPlotBioSiteLoc <- ggplot(filter(cor_results, Anion %in% anion_vars), 
+                          aes(x = Anion, y = Location_Algae, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = filter(cor_results, Anion %in% anion_vars & significant), 
+            color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(
+    low = "blue", mid = "white", high = "red", midpoint = 0, 
+    name = "Spearman r"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    axis.text.y = element_text(size = 9)
+  )
+
+spearmanPlotBioSiteLoc
+
+ggsave(spearmanPlotBioSiteLoc, filename = "spearmanPlotBioSiteLoc.png", width = 8, height = 7, bg = "white")
+```
+
+## Cell Density vs. Total Biovolume & Anions (by Index) {.tabset}
+
+### Wildlife Index
+```{r}
+# Variable groups
+algae_vars <- c("CellDensity", "TotalBiovolume")
+anion_vars <- c("Cl", "NO2NO3", "SO42", "PO43", "Fo")
+
+# Filtered data by WildlifeScoringIndex 
+df_filtered <- dfIndex %>%
+  select(WildlifeScoringIndex, all_of(c(algae_vars, anion_vars))) %>%
+  na.omit()
+
+# Function to extract correlations
+get_correlation_data <- function(data, location_name) {
+  cor_matrix <- rcorr(as.matrix(data[, -1]), type = "spearman")
+  
+  r_vals <- cor_matrix$r
+  p_vals <- cor_matrix$P
+
+  # Algae vs Anion correlations
+  pairs <- expand.grid(Algae = algae_vars, Anion = anion_vars, stringsAsFactors = FALSE)
+
+  results <- pairs %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[Algae, Anion],
+      p_value = p_vals[Algae, Anion],
+      significant = p_value < 0.05,
+      label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+      WildlifeScoringIndex = location_name
+    ) %>%
+    ungroup()
+
+  # CellDensity vs TotalBiovolume correlation
+  bio_pair <- tibble(
+    Algae = algae_vars,
+    Anion = "TotalBiovolume",
+    Spearman_r = r_vals["CellDensity", "TotalBiovolume"],
+    p_value = p_vals["CellDensity", "TotalBiovolume"],
+    significant = p_value < 0.05,
+    label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+    WildlifeScoringIndex = location_name
+  )
+
+  bind_rows(results, bio_pair)
+}
+
+# Apply function across WildlifeScoringIndex groups
+cor_results <- df_filtered %>%
+  group_split(WildlifeScoringIndex) %>%
+  map_dfr(~get_correlation_data(.x, unique(.x$WildlifeScoringIndex)))
+
+# Create combined y-axis label
+cor_results <- cor_results %>%
+  mutate(Location_Algae = paste(WildlifeScoringIndex, Algae, sep = " - "))
+
+# Order the rows by WildlifeScoringIndex, then Algae
+location_order <- unique(cor_results$WildlifeScoringIndex)
+
+cor_results <- cor_results %>%
+  mutate(Location_Algae = factor(
+    Location_Algae,
+    levels = unlist(lapply(location_order, function(loc) {
+      c(paste(loc, "CellDensity", sep = " - "),
+        paste(loc, "TotalBiovolume", sep = " - "))
+    }))
+  ))
+
+# Order Anion axis (x-axis), adding TotalBiovolume last
+cor_results$Anion <- factor(cor_results$Anion, levels = c(anion_vars))
+
+# Plot
+spearmanPlotBioWildlifeScoringIndex <- ggplot(filter(cor_results, Anion %in% anion_vars), 
+                          aes(x = Anion, y = Location_Algae, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = filter(cor_results, Anion %in% anion_vars & significant), 
+            color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(
+    low = "blue", mid = "white", high = "red", midpoint = 0, 
+    name = "Spearman r"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    axis.text.y = element_text(size = 9)
+  )
+
+spearmanPlotBioWildlifeScoringIndex
+
+ggsave(spearmanPlotBioWildlifeScoringIndex, filename = "spearmanPlotBioWildlifeScoringIndex.png", width = 8, height = 7, bg = "white")
+```
+
+### Rocks Index
+```{r}
+# Variable groups
+algae_vars <- c("CellDensity", "TotalBiovolume")
+anion_vars <- c("Cl", "NO2NO3", "SO42", "PO43", "Fo")
+
+# Filtered data by RocksDustScoringIndex 
+df_filtered <- dfIndex %>%
+  select(RocksDustScoringIndex, all_of(c(algae_vars, anion_vars))) %>%
+  na.omit()
+
+# Function to extract correlations
+get_correlation_data <- function(data, location_name) {
+  cor_matrix <- rcorr(as.matrix(data[, -1]), type = "spearman")
+  
+  r_vals <- cor_matrix$r
+  p_vals <- cor_matrix$P
+
+  # Algae vs Anion correlations
+  pairs <- expand.grid(Algae = algae_vars, Anion = anion_vars, stringsAsFactors = FALSE)
+
+  results <- pairs %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[Algae, Anion],
+      p_value = p_vals[Algae, Anion],
+      significant = p_value < 0.05,
+      label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+      RocksDustScoringIndex = location_name
+    ) %>%
+    ungroup()
+
+  # CellDensity vs TotalBiovolume correlation
+  bio_pair <- tibble(
+    Algae = algae_vars,
+    Anion = "TotalBiovolume",
+    Spearman_r = r_vals["CellDensity", "TotalBiovolume"],
+    p_value = p_vals["CellDensity", "TotalBiovolume"],
+    significant = p_value < 0.05,
+    label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+    RocksDustScoringIndex = location_name
+  )
+
+  bind_rows(results, bio_pair)
+}
+
+# Apply function across RocksDustScoringIndex groups
+cor_results <- df_filtered %>%
+  group_split(RocksDustScoringIndex) %>%
+  map_dfr(~get_correlation_data(.x, unique(.x$RocksDustScoringIndex)))
+
+# Create combined y-axis label
+cor_results <- cor_results %>%
+  mutate(Location_Algae = paste(RocksDustScoringIndex, Algae, sep = " - "))
+
+# Order the rows by RocksDustScoringIndex, then Algae
+location_order <- unique(cor_results$RocksDustScoringIndex)
+
+cor_results <- cor_results %>%
+  mutate(Location_Algae = factor(
+    Location_Algae,
+    levels = unlist(lapply(location_order, function(loc) {
+      c(paste(loc, "CellDensity", sep = " - "),
+        paste(loc, "TotalBiovolume", sep = " - "))
+    }))
+  ))
+
+# Order Anion axis (x-axis), adding TotalBiovolume last
+cor_results$Anion <- factor(cor_results$Anion, levels = c(anion_vars))
+
+# Plot
+spearmanPlotBioRocksDustScoringIndex <- ggplot(filter(cor_results, Anion %in% anion_vars), 
+                          aes(x = Anion, y = Location_Algae, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = filter(cor_results, Anion %in% anion_vars & significant), 
+            color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(
+    low = "blue", mid = "white", high = "red", midpoint = 0, 
+    name = "Spearman r"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    axis.text.y = element_text(size = 9)
+  )
+
+spearmanPlotBioRocksDustScoringIndex
+
+ggsave(spearmanPlotBioRocksDustScoringIndex, filename = "spearmanPlotBioRocksDustScoringIndex.png", width = 8, height = 7, bg = "white")
+```
+
+### Ocean Index
+
+```{r}
+# Variable groups
+algae_vars <- c("CellDensity", "TotalBiovolume")
+anion_vars <- c("Cl", "NO2NO3", "SO42", "PO43", "Fo")
+
+# Filtered data by OceanicInfluenceScoringIndex 
+df_filtered <- dfIndex %>%
+  select(OceanicInfluenceScoringIndex, all_of(c(algae_vars, anion_vars))) %>%
+  na.omit()
+
+# Function to extract correlations
+get_correlation_data <- function(data, location_name) {
+  cor_matrix <- rcorr(as.matrix(data[, -1]), type = "spearman")
+  
+  r_vals <- cor_matrix$r
+  p_vals <- cor_matrix$P
+
+  # Algae vs Anion correlations
+  pairs <- expand.grid(Algae = algae_vars, Anion = anion_vars, stringsAsFactors = FALSE)
+
+  results <- pairs %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[Algae, Anion],
+      p_value = p_vals[Algae, Anion],
+      significant = p_value < 0.05,
+      label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+      OceanicInfluenceScoringIndex = location_name
+    ) %>%
+    ungroup()
+
+  # CellDensity vs TotalBiovolume correlation
+  bio_pair <- tibble(
+    Algae = algae_vars,
+    Anion = "TotalBiovolume",
+    Spearman_r = r_vals["CellDensity", "TotalBiovolume"],
+    p_value = p_vals["CellDensity", "TotalBiovolume"],
+    significant = p_value < 0.05,
+    label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+    OceanicInfluenceScoringIndex = location_name
+  )
+
+  bind_rows(results, bio_pair)
+}
+
+# Apply function across OceanicInfluenceScoringIndex groups
+cor_results <- df_filtered %>%
+  group_split(OceanicInfluenceScoringIndex) %>%
+  map_dfr(~get_correlation_data(.x, unique(.x$OceanicInfluenceScoringIndex)))
+
+# Create combined y-axis label
+cor_results <- cor_results %>%
+  mutate(Location_Algae = paste(OceanicInfluenceScoringIndex, Algae, sep = " - "))
+
+# Order the rows by OceanicInfluenceScoringIndex, then Algae
+location_order <- unique(cor_results$OceanicInfluenceScoringIndex)
+
+cor_results <- cor_results %>%
+  mutate(Location_Algae = factor(
+    Location_Algae,
+    levels = unlist(lapply(location_order, function(loc) {
+      c(paste(loc, "CellDensity", sep = " - "),
+        paste(loc, "TotalBiovolume", sep = " - "))
+    }))
+  ))
+
+# Order Anion axis (x-axis), adding TotalBiovolume last
+cor_results$Anion <- factor(cor_results$Anion, levels = c(anion_vars))
+
+# Plot
+spearmanPlotBioOceanicInfluenceScoringIndex <- ggplot(filter(cor_results, Anion %in% anion_vars), 
+                          aes(x = Anion, y = Location_Algae, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = filter(cor_results, Anion %in% anion_vars & significant), 
+            color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(
+    low = "blue", mid = "white", high = "red", midpoint = 0, 
+    name = "Spearman r"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    axis.text.y = element_text(size = 9)
+  )
+
+spearmanPlotBioOceanicInfluenceScoringIndex
+
+ggsave(spearmanPlotBioOceanicInfluenceScoringIndex, filename = "spearmanPlotBioOceanicInfluenceScoringIndex.png", width = 8, height = 7, bg = "white")
+```
+
+## Cell Density & Anions (by Color)
+
+```{r}
+# Variable groups
+algae_vars <- c("CellDensity")
+anion_vars <- c("Cl", "NO2NO3", "SO42", "PO43", "Fo")
+
+# Filtered data
+df_filtered <- dfBio %>%
+  filter(Location == "Antarctic Peninsula") %>% 
+  filter(Color %in% c("green", "red")) %>% 
+  select(Location, Color, all_of(c(algae_vars, anion_vars))) %>%
+  na.omit()
+
+# Function to extract correlations
+get_correlation_data <- function(data, location_name, algae_name) {
+  cor_matrix <- rcorr(as.matrix(data[, c(algae_vars, anion_vars)]), type = "spearman")
+  
+  r_vals <- cor_matrix$r
+  p_vals <- cor_matrix$P
+
+  # Extract only CellDensity vs anion correlations
+  pairs <- expand.grid(AlgaeVar = algae_vars, Anion = anion_vars, stringsAsFactors = FALSE)
+
+  results <- pairs %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[AlgaeVar, Anion],
+      p_value = p_vals[AlgaeVar, Anion],
+      significant = p_value < 0.05,
+      label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+      Location = location_name,
+      SnowColor = algae_name
+    ) %>%
+    ungroup()
+
+  return(results)
+}
+
+# Apply across all Location x SnowColor groups
+cor_results <- df_filtered %>%
+  group_split(Location, Color) %>%
+  map_dfr(~get_correlation_data(.x, unique(.x$Location), unique(.x$Color)))
+
+# Convert Anion to factor for plot order
+cor_results$Anion <- factor(cor_results$Anion, levels = anion_vars)
+
+# Plot with SnowColor on y-axis nested within Location
+spearmanPlotAPRG <- ggplot(cor_results, aes(x = Anion, y = interaction(Location, SnowColor, sep = " - "), fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = filter(cor_results, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0, name = "Spearman r") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_blank(),
+        axis.text.y = element_text(size = 8))
+
+spearmanPlotAPRG
+
+# Save
+ggsave(spearmanPlotAPRG, filename = "spearmanPlotAPRG.png", width = 7, height = 6, bg = "white")
+```
+
+## Cell Density & Anions (Damoy Point by Color)
+
+```{r}
+# Variable groups
+algae_vars <- c("CellDensity")
+anion_vars <- c("Cl", "NO2NO3", "SO42", "PO43", "Fo")
+
+# Filtered data
+df_filtered <- dfBio %>%
+  filter(Site == "Damoy Point") %>% 
+  filter(Color %in% c("green", "red")) %>% 
+  select(Location, Color, all_of(c(algae_vars, anion_vars))) %>%
+  na.omit()
+
+# Function to extract correlations
+get_correlation_data <- function(data, location_name, algae_name) {
+  cor_matrix <- rcorr(as.matrix(data[, c(algae_vars, anion_vars)]), type = "spearman")
+  
+  r_vals <- cor_matrix$r
+  p_vals <- cor_matrix$P
+
+  # Extract only CellDensity vs anion correlations
+  pairs <- expand.grid(AlgaeVar = algae_vars, Anion = anion_vars, stringsAsFactors = FALSE)
+
+  results <- pairs %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[AlgaeVar, Anion],
+      p_value = p_vals[AlgaeVar, Anion],
+      significant = p_value < 0.05,
+      label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+      Location = location_name,
+      SnowColor = algae_name
+    ) %>%
+    ungroup()
+
+  return(results)
+}
+
+# Apply across all Location x SnowColor groups
+cor_results <- df_filtered %>%
+  group_split(Location, Color) %>%
+  map_dfr(~get_correlation_data(.x, unique(.x$Location), unique(.x$Color)))
+
+# Convert Anion to factor for plot order
+cor_results$Anion <- factor(cor_results$Anion, levels = anion_vars)
+
+# Plot with SnowColor on y-axis nested within Location
+spearmanPlotAPRG_DP <- ggplot(cor_results, aes(x = Anion, y = interaction(Location, SnowColor, sep = " - "), fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = filter(cor_results, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0, name = "Spearman r") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_blank(),
+        axis.text.y = element_text(size = 8))
+
+spearmanPlotAPRG_DP
+
+# Save
+ggsave(spearmanPlotAPRG_DP, filename = "spearmanPlotAPRG_DP.png", width = 7, height = 7, bg = "white")
+```
+
+## Biovolume Concentration & Anions 
+```{r}
+# Variable groups
+algae_vars <- c("TotalBiovolume")
+anion_vars <- c("Cl", "NO2NO3", "SO42", "PO43", "Fo")
+
+# Filtered data
+df_filtered <- dfBio %>%
+  filter(Location == "Antarctic Peninsula") %>% 
+  filter(Color %in% c("green", "red")) %>% 
+  select(Location, Color, all_of(c(algae_vars, anion_vars))) %>%
+  na.omit()
+
+# Function to extract correlations
+get_correlation_data <- function(data, location_name, algae_name) {
+  cor_matrix <- rcorr(as.matrix(data[, c(algae_vars, anion_vars)]), type = "spearman")
+  
+  r_vals <- cor_matrix$r
+  p_vals <- cor_matrix$P
+
+  # Extract only CellDensity vs anion correlations
+  pairs <- expand.grid(AlgaeVar = algae_vars, Anion = anion_vars, stringsAsFactors = FALSE)
+
+  results <- pairs %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[AlgaeVar, Anion],
+      p_value = p_vals[AlgaeVar, Anion],
+      significant = p_value < 0.05,
+      label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+      Location = location_name,
+      SnowColor = algae_name
+    ) %>%
+    ungroup()
+
+  return(results)
+}
+
+# Apply across all Location x SnowColor groups
+cor_results <- df_filtered %>%
+  group_split(Location, Color) %>%
+  map_dfr(~get_correlation_data(.x, unique(.x$Location), unique(.x$Color)))
+
+# Convert Anion to factor for plot order
+cor_results$Anion <- factor(cor_results$Anion, levels = anion_vars)
+
+# Plot with SnowColor on y-axis nested within Location
+spearmanPlotAPRGTotBio <- ggplot(cor_results, aes(x = Anion, y = interaction(Location, SnowColor, sep = " - "), fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = filter(cor_results, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0, name = "Spearman r") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_blank(),
+        axis.text.y = element_text(size = 8))
+
+spearmanPlotAPRGTotBio
+
+# Save
+ggsave(spearmanPlotAPRGTotBio, filename = "spearmanPlotAPRGTotBio.png", width = 7, height = 6, bg = "white")
+```
+
+## Biovolume & Anions 
+```{r}
+# Variable groups
+algae_vars <- c("Biovolume")
+anion_vars <- c("Cl", "NO2NO3", "SO42", "PO43", "Fo")
+
+# Filtered data
+df_filtered <- dfBio %>%
+  filter(Site != "Pendulum Cove, Deception Island") %>% 
+  filter(Site != "Danco Island") %>% 
+  select(Site, all_of(c(algae_vars, anion_vars))) %>%
+  na.omit()
+
+# Function to extract correlations
+get_correlation_data <- function(data, location_name) {
+  cor_matrix <- rcorr(as.matrix(data[, -1]), type = "spearman")
+  
+  r_vals <- cor_matrix$r
+  p_vals <- cor_matrix$P
+
+  # Extract only CellDensity vs anion correlations
+  pairs <- expand.grid(Algae = algae_vars, Anion = anion_vars, stringsAsFactors = FALSE)
+
+  results <- pairs %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[Algae, Anion],
+      p_value = p_vals[Algae, Anion],
+      significant = p_value < 0.05,
+      label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+      Site = location_name
+    ) %>%
+    ungroup()
+
+  return(results)
+}
+
+# Apply across all sites
+cor_results <- df_filtered %>%
+  group_split(Site) %>%
+  map_dfr(~get_correlation_data(.x, unique(.x$Site)))
+
+# Convert Anion to factor with desired order
+cor_results$Anion <- factor(cor_results$Anion, levels = anion_vars)
+
+# Plot
+spearmanPlotL <- ggplot(cor_results, aes(x = Anion, y = Site, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = filter(cor_results, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0, name = "Spearman r") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_blank())
+  
+spearmanPlotL
+
+ggsave(spearmanPlotL, filename = "spearmanPlotL.png", width = 7, height = 7, bg = "white")
+```
+
+## Biovolume & Anions (by Latitude)
+```{r}
+# Variable groups
+algae_vars <- c("Biovolume")
+anion_vars <- c("Cl", "NO2NO3", "SO42", "PO43", "Fo")
+
+# Filtered data
+df_filtered <- dfIndex %>%
+  filter(SiteLoc != "North") %>% 
+  select(SiteLoc, all_of(c(algae_vars, anion_vars))) %>%
+  na.omit()
+
+# Function to extract correlations
+get_correlation_data <- function(data, location_name) {
+  cor_matrix <- rcorr(as.matrix(data[, -1]), type = "spearman")
+  
+  r_vals <- cor_matrix$r
+  p_vals <- cor_matrix$P
+
+  # Extract only Biovolume vs anion correlations
+  pairs <- expand.grid(Algae = algae_vars, Anion = anion_vars, stringsAsFactors = FALSE)
+
+  results <- pairs %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[Algae, Anion],
+      p_value = p_vals[Algae, Anion],
+      significant = p_value < 0.05,
+      label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+      SiteLoc = location_name
+    ) %>%
+    ungroup()
+
+  return(results)
+}
+
+# Apply across all SiteLoc groups
+cor_results <- df_filtered %>%
+  group_split(SiteLoc) %>%
+  map_dfr(~get_correlation_data(.x, unique(.x$SiteLoc)))
+
+# Convert Anion to factor with desired order
+cor_results$Anion <- factor(cor_results$Anion, levels = anion_vars)
+
+# Plot
+spearmanPlotLSiteLoc <- ggplot(cor_results, aes(x = Anion, y = SiteLoc, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = filter(cor_results, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0, name = "Spearman r") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_blank())
+
+spearmanPlotLSiteLoc
+
+ggsave(spearmanPlotLSiteLoc, filename = "spearmanPlotLSiteLoc.png", width = 7, height = 7, bg = "white")
+```
+
+## Biovolume & Anions (by Index) {.tabset}
+
+### Wildlife Index
+```{r}
+# Variable groups
+algae_vars <- c("Biovolume")
+anion_vars <- c("Cl", "NO2NO3", "SO42", "PO43", "Fo")
+
+# Filtered data
+df_filtered <- dfIndex %>%
+  select(WildlifeScoringIndex, all_of(c(algae_vars, anion_vars))) %>%
+  na.omit()
+
+# Function to extract correlations
+get_correlation_data <- function(data, location_name) {
+  cor_matrix <- rcorr(as.matrix(data[, -1]), type = "spearman")
+  
+  r_vals <- cor_matrix$r
+  p_vals <- cor_matrix$P
+
+  # Extract only Biovolume vs anion correlations
+  pairs <- expand.grid(Algae = algae_vars, Anion = anion_vars, stringsAsFactors = FALSE)
+
+  results <- pairs %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[Algae, Anion],
+      p_value = p_vals[Algae, Anion],
+      significant = p_value < 0.05,
+      label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+      WildlifeScoringIndex = location_name
+    ) %>%
+    ungroup()
+
+  return(results)
+}
+
+# Apply across all WildlifeScoringIndex groups
+cor_results <- df_filtered %>%
+  group_split(WildlifeScoringIndex) %>%
+  map_dfr(~get_correlation_data(.x, unique(.x$WildlifeScoringIndex)))
+
+# Convert Anion to factor with desired order
+cor_results$Anion <- factor(cor_results$Anion, levels = anion_vars)
+
+# Plot
+spearmanPlotLWildlifeScoringIndex <- ggplot(cor_results, aes(x = Anion, y = WildlifeScoringIndex, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = filter(cor_results, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0, name = "Spearman r") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_blank())
+
+spearmanPlotLWildlifeScoringIndex
+
+ggsave(spearmanPlotLWildlifeScoringIndex, filename = "spearmanPlotLWildlifeScoringIndex.png", width = 7, height = 7, bg = "white")
+```
+
+### Rocks Index
+```{r}
+# Variable groups
+algae_vars <- c("Biovolume")
+anion_vars <- c("Cl", "NO2NO3", "SO42", "PO43", "Fo")
+
+# Filtered data
+df_filtered <- dfIndex %>%
+  select(RocksDustScoringIndex, all_of(c(algae_vars, anion_vars))) %>%
+  na.omit()
+
+# Function to extract correlations
+get_correlation_data <- function(data, location_name) {
+  cor_matrix <- rcorr(as.matrix(data[, -1]), type = "spearman")
+  
+  r_vals <- cor_matrix$r
+  p_vals <- cor_matrix$P
+
+  # Extract only Biovolume vs anion correlations
+  pairs <- expand.grid(Algae = algae_vars, Anion = anion_vars, stringsAsFactors = FALSE)
+
+  results <- pairs %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[Algae, Anion],
+      p_value = p_vals[Algae, Anion],
+      significant = p_value < 0.05,
+      label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+      RocksDustScoringIndex = location_name
+    ) %>%
+    ungroup()
+
+  return(results)
+}
+
+# Apply across all RocksDustScoringIndex groups
+cor_results <- df_filtered %>%
+  group_split(RocksDustScoringIndex) %>%
+  map_dfr(~get_correlation_data(.x, unique(.x$RocksDustScoringIndex)))
+
+# Convert Anion to factor with desired order
+cor_results$Anion <- factor(cor_results$Anion, levels = anion_vars)
+
+# Plot
+spearmanPlotLRocksDustScoringIndex <- ggplot(cor_results, aes(x = Anion, y = RocksDustScoringIndex, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = filter(cor_results, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0, name = "Spearman r") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_blank())
+
+spearmanPlotLRocksDustScoringIndex
+
+ggsave(spearmanPlotLRocksDustScoringIndex, filename = "spearmanPlotLRocksDustScoringIndex.png", width = 7, height = 7, bg = "white")
+```
+
+### Oceanic Influence Index
+```{r}
+# Variable groups
+algae_vars <- c("Biovolume")
+anion_vars <- c("Cl", "NO2NO3", "SO42", "PO43", "Fo")
+
+# Filtered data
+df_filtered <- dfIndex %>%
+  select(OceanicInfluenceScoringIndex, all_of(c(algae_vars, anion_vars))) %>%
+  na.omit()
+
+# Function to extract correlations
+get_correlation_data <- function(data, location_name) {
+  cor_matrix <- rcorr(as.matrix(data[, -1]), type = "spearman")
+  
+  r_vals <- cor_matrix$r
+  p_vals <- cor_matrix$P
+
+  # Extract only Biovolume vs anion correlations
+  pairs <- expand.grid(Algae = algae_vars, Anion = anion_vars, stringsAsFactors = FALSE)
+
+  results <- pairs %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[Algae, Anion],
+      p_value = p_vals[Algae, Anion],
+      significant = p_value < 0.05,
+      label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+      OceanicInfluenceScoringIndex = location_name
+    ) %>%
+    ungroup()
+
+  return(results)
+}
+
+# Apply across all OceanicInfluenceScoringIndex groups
+cor_results <- df_filtered %>%
+  group_split(OceanicInfluenceScoringIndex) %>%
+  map_dfr(~get_correlation_data(.x, unique(.x$OceanicInfluenceScoringIndex)))
+
+# Convert Anion to factor with desired order
+cor_results$Anion <- factor(cor_results$Anion, levels = anion_vars)
+
+# Plot
+spearmanPlotLOceanicInfluenceScoringIndex <- ggplot(cor_results, aes(x = Anion, y = OceanicInfluenceScoringIndex, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = filter(cor_results, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0, name = "Spearman r") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_blank())
+
+spearmanPlotLOceanicInfluenceScoringIndex
+
+ggsave(spearmanPlotLOceanicInfluenceScoringIndex, filename = "spearmanPlotLOceanicInfluenceScoringIndex.png", width = 7, height = 7, bg = "white")
+```
+
+## Biovolume & Anions (by Color)
+
+```{r}
+# Variable groups
+algae_vars <- c("Biovolume")
+anion_vars <- c("Cl", "NO2NO3", "SO42", "PO43", "Fo")
+
+# Filtered data
+df_filtered <- dfBio %>%
+  filter(Location == "Antarctic Peninsula") %>% 
+  filter(Color %in% c("green", "red")) %>% 
+  select(Location, Color, all_of(c(algae_vars, anion_vars))) %>%
+  na.omit()
+
+# Function to extract correlations
+get_correlation_data <- function(data, location_name, algae_name) {
+  cor_matrix <- rcorr(as.matrix(data[, c(algae_vars, anion_vars)]), type = "spearman")
+  
+  r_vals <- cor_matrix$r
+  p_vals <- cor_matrix$P
+
+  # Extract only CellDensity vs anion correlations
+  pairs <- expand.grid(AlgaeVar = algae_vars, Anion = anion_vars, stringsAsFactors = FALSE)
+
+  results <- pairs %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[AlgaeVar, Anion],
+      p_value = p_vals[AlgaeVar, Anion],
+      significant = p_value < 0.05,
+      label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+      Location = location_name,
+      SnowColor = algae_name
+    ) %>%
+    ungroup()
+
+  return(results)
+}
+
+# Apply across all Location x SnowColor groups
+cor_results <- df_filtered %>%
+  group_split(Location, Color) %>%
+  map_dfr(~get_correlation_data(.x, unique(.x$Location), unique(.x$Color)))
+
+# Convert Anion to factor for plot order
+cor_results$Anion <- factor(cor_results$Anion, levels = anion_vars)
+
+# Plot with SnowColor on y-axis nested within Location
+spearmanPlotAPRGL <- ggplot(cor_results, aes(x = Anion, y = interaction(Location, SnowColor, sep = " - "), fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = filter(cor_results, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0, name = "Spearman r") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_blank(),
+        axis.text.y = element_text(size = 8))
+
+spearmanPlotAPRGL
+
+# Save
+ggsave(spearmanPlotAPRGL, filename = "spearmanPlotAPRGL.png", width = 7, height = 6, bg = "white")
+```

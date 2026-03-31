@@ -1,0 +1,2177 @@
+---
+title: "Data Vizualization - Pigment Concentration Normalized by Cell Density"
+author: "Ellie Ryan"
+date: "`r Sys.Date()`"
+output:
+   html_document:
+    theme: flatly
+    highlight: zenburn
+    toc: true
+    toc_float: true
+    toc_collapsed: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Created:** 7/16/2025
+
+**Last Modified:** 1/23/2025
+
+```{r, message=FALSE, warning=FALSE}
+# Load packages
+library(tidyverse)
+library(lubridate)
+library(stringr)
+library(kableExtra)
+library(scales)
+library(GGally)
+library(patchwork)
+library(Hmisc)
+library(reshape2)
+library(car)
+library(FSA)
+library(vegan)
+```
+
+```{r}
+regionPal <- c(
+  "North" = "#284C46FF",
+  "South" = "#b04a25"
+) 
+
+colorPal <- c(
+  "clean" = "#95879f",
+  "red" = "#b04a25",
+  "green" = "#647d6a"
+)
+
+algaePal <- c(
+  "clean" = "#a5bdc0",
+  "algae" = "#735a69"
+)
+
+pigPal <- c(
+  "Astaxanthin" = "#b04a25",
+  "Lutein" = "#d9983b",
+  "ChlA" = "#284C46FF",
+  "ChlB" = "#647d6a",
+  "BetaC" = "#4d1d05",
+  "Pheophorbide" = "#414c66", 
+  "Pheophytin" = "#95879f"
+)
+
+plot_theme <- theme(
+  axis.title = element_text(size = 12, face = "bold"), # Axis labels: 12 pt, bold
+  axis.text = element_text(size = 12), # Axis text: 12 pt
+  axis.line = element_line(linewidth = 0.5),  # Thicker axis line
+  legend.position = "top", # Position legend at the top
+  legend.justification = c(0, 1), # Justify legend to top-left
+  legend.text = element_text(size = 12), # Legend text: 12 pt
+  legend.title = element_text(size = 12), 
+  plot.title = element_text(size = 14, face = "bold"),  # Adjust plot title size
+  plot.subtitle = element_text(size = 13, face = "italic"), 
+  plot.margin = margin(20, 20, 20, 20)
+)
+
+plot_themePub <- theme(
+  text = element_text(family = "Helvetica"),
+  axis.title.x = element_text(size = 10, margin = margin(t = 2)),  # t = top margin
+  axis.title.y = element_text(size = 10, margin = margin(r = 4)),  # r = right margin
+  axis.text = element_text(size = 10),
+  axis.line = element_blank(),
+  axis.ticks.x = element_blank(),
+  axis.ticks.y = element_line(color = "black", linewidth = 0.25),  # Add tick marks
+  axis.ticks.length = unit(-0.15, "cm"),  # Length of tick marks
+  panel.grid = element_blank(),
+  panel.background = element_blank(),
+  panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
+  legend.position = "top",
+  legend.justification = c(0, 1),
+  legend.text = element_text(size = 10),
+  legend.title = element_text(size = 10),
+  plot.title = element_text(size = 14, face = "bold"),
+  plot.subtitle = element_text(size = 13, face = "italic"),
+  plot.margin = margin(3, 5, 3, 3)
+)
+
+plot_theme2 <- theme(
+  axis.title = element_text(size = 12, face = "bold"), # Axis labels: 12 pt, bold
+  axis.text = element_text(size = 12), # Axis text: 12 pt
+  axis.line = element_line(linewidth = 0.5),  # Thicker axis line
+  legend.position = "top", # Position legend at the top
+  legend.justification = c(0, 1), # Justify legend to top-left
+  legend.text = element_text(size = 12), # Legend text: 12 pt
+  legend.title = element_text(size = 12), 
+  plot.title = element_text(size = 14, face = "bold"),  # Adjust plot title size
+  plot.subtitle = element_text(size = 13, face = "italic"), 
+  axis.text.x = element_text(angle = 45, hjust = 1), 
+  plot.margin = margin(20, 20, 20, 20)
+)
+
+pairsplot_theme <- theme(
+  text = element_text(size = 10),  # Adjust variable name text size
+  axis.text = element_text(size = 8),  # Adjust axis text size
+  plot.title = element_text(size = 12, face = "bold"),  # Adjust plot title size
+  legend.text = element_text(size = 12))  # Adjust legend text size
+```
+
+
+# Overview
+
+The purpose of this `.Rmd` is to visualize normalized pigment concentration (ng/cell) by site and color, and obtain basic summary statistics associated with each pigment in order to inform my next steps in analysis. I will additionally perform an ordination to reduce the dimensions of my pigment data for simpler visualizations. Before proceeding, I will clean the dataset so that it features only the variables I am interested in for this analysis, and normalize pigment concentration by cell density. In this dataset, 106 samples are used from the Antarctic Peninsula, following the removal of 5 outliers. These observations are broken down by `Color`, or the apparent snow color at time of sample collection. To keep things simple, there are only three levels to the `Color` category: red, green and clean. The breakdown of samples collected in the WAP is as follows:
+
+-   Antarctic Peninsula:
+    -   107 samples
+        -   43 red
+        -   44 green
+        -   18 clean
+        
+*NOTE: Fewer samples were used for analysis, since there are NA values for pigment concentrations of some samples.*
+        
+From anion outlier analysis, the following outliers were identified for removal:
+
+-   2025-02-19-SI-algae3
+-   2025-02-24-DA-algae2
+-   2025-02-24-DA-algae6
+-   2025-03-07-NH-algae3
+-   2025-01-12-PI-algae10
+-   2025-01-17-PI-algae12 
+-   2025-01-17-PI-algae22
+
+See the Preliminary Results and Figures doc for justification for removal of each. 
+
+## Data Wrangling
+
+```{r}
+df <- read.csv("CompiledDataPI.csv")
+str(df)
+```
+
+Adding an `Algae` column to classify samples as algae or clean snow samples and a `Region` column to separate North and South samples.
+
+```{r}
+# Format date column 
+df <- df %>%
+  mutate(
+    Date = as.Date(Date, format = "%m/%d/%y"))
+
+# Add Algae
+df <- df %>%  
+  mutate(Algae = case_when(
+    Color %in% c("red", "green") ~ "algae",
+    Color == "clean" ~ 'clean'
+  )) %>% 
+  relocate(Algae, .after = Color)
+
+# Add Region
+df <- df %>% 
+  mutate(
+  Region = if_else(
+    Site %in% c("Horseshoe Island", "Stonington Island"),
+    "South",
+    "North")) %>% 
+  relocate(Region, .after = Site)
+
+# Add LocAbbrev
+df <- df %>% mutate(LocAbbrev = case_when(
+  Location == "Antarctic Peninsula" ~ paste("WAP")
+)) %>%  
+  relocate(LocAbbrev, .after = Site)
+```
+
+And normalize pigment concentration by dividing by cell density and multiplying by 1000 to get units of ng/cell. This results in NaN and Inf values for samples with a cell density of 0 or NA. I'll remove these before proceeding. 
+```{r}
+dfNorm <- df %>% 
+  mutate(ChlA = (ChlA/CellDensity)*1000,
+         ChlB = (ChlB/CellDensity)*1000,
+         Astaxanthin = (Astaxanthin/CellDensity)*1000,
+         Lutein = (Lutein/CellDensity)*1000,
+         BetaC = (BetaC/CellDensity)*1000,
+         Pheophytin = (Pheophytin/CellDensity)*1000,
+         Pheophorbide = (Pheophorbide/CellDensity)*1000) 
+```
+
+```{r}
+str(dfNorm)
+```
+
+```{r}
+outliers <- c(
+  "2025-02-19-SI-algae3",
+  "2025-02-24-DA-algae2",
+  "2025-02-24-DA-algae6",
+  "2025-03-07-NH-algae3",
+  "2025-01-12-PI-algae10",
+  "2025-01-17-PI-algae12",
+  "2025-01-17-PI-algae22"
+  )
+
+dfNorm <- dfNorm %>% 
+  filter(!SampleID %in% outliers)
+```
+
+### Pigments
+```{r}
+dfPig <- dfNorm %>% 
+  select(c("SampleID", "Date", "Location", "Site", "Region", "LocAbbrev", "Color", "Algae", Astaxanthin:Pheophytin)) %>% 
+  na.omit(dfPig)
+```
+
+### Pigments & Cells
+```{r}
+dfPigCell <- dfNorm %>% 
+  select(c("SampleID", "Date", "Location", "Site", "Region", "LocAbbrev", "Color", "Algae", "CellDensity", "CellLength", Astaxanthin:Pheophytin)) %>% 
+  na.omit(dfPig)
+
+dfPigCell <- dfPigCell %>% 
+  mutate(
+    # Calulate volume (µm^3)
+    CellVolume = (pi/6)*(CellLength^3)) %>% 
+  relocate(CellVolume, .after = CellLength)
+```
+
+### Pigments & Anions 
+```{r}
+dfAnion <- dfNorm %>% 
+  select(c("SampleID", "Date", "Location", "Site", "Region", "LocAbbrev", "Color", "Algae", Astaxanthin:Pheophytin, Fo:SO42)) %>% 
+  mutate(Algae = case_when(
+    Color %in% c("red", "green") ~ "algae",
+    Color == "clean" ~ 'clean'
+  )) %>% 
+  mutate(NO2NO3 = NO2 + NO3) %>% 
+  relocate(Algae, .after = Color) %>% 
+  relocate(NO2NO3, .after = Cl) %>% 
+  select(!NO2) %>% 
+  select(!NO3) %>% 
+  na.omit(dfAnion)
+```
+
+### Pigments (Pivoted)
+```{r}
+dfPig_long <- dfPig %>% 
+  pivot_longer(cols = Astaxanthin:Pheophytin,
+               names_to = "Pigment",
+               values_to = "Concentration")
+```
+
+### Anions (Pivoted)
+```{r}
+dfAnion_long <- dfAnion %>% 
+  pivot_longer(cols = c(Fo, Cl, SO42, PO43, NO2NO3),
+               names_to = "Anion",
+               values_to = "Concentration")
+```
+
+# ANOVA/Kruskal Wallis Test
+Before proceeding with an ANOVA test to assess differences in pigment concentration between snow colors, I am going to check to see if these variables follow the assumptions of normality and equal variance required to run an ANOVA: 
+```{r}
+# Step 1: Group by pigment and nest data
+nested <- dfPig_long %>%
+  group_by(Pigment) %>%
+  nest()
+
+# Step 2: Fit ANOVA model, extract residuals, and run tests
+anovaAssumptionsResults <- nested %>%
+  mutate(
+    # Fit ANOVA model
+    aov_model = map(data, ~ aov(Concentration ~ Color, data = .x)),
+    
+    # Shapiro-Wilk test for normality of residuals
+    shapiro_p = map_dbl(aov_model, ~ shapiro.test(residuals(.x))$p.value),
+    
+    # Levene's Test for homogeneity of variance
+    levene_p = map_dbl(data, ~leveneTest(Concentration ~ factor(Color), data = .x)$`Pr(>F)`[1])
+  )
+```
+
+From the below results, it appears that the majority of the pigments are neither normally distributed or have equal variances. Because of this, I am going to proceed with a Kruskal-Wallis test in lieu of an ANOVA. 
+
+```{r}
+anovaAssumptionsResults %>%
+  select(Pigment, shapiro_p, levene_p) %>%
+  mutate(
+    normality_ok = shapiro_p > 0.05,
+    homogeneity_ok = levene_p > 0.05
+  )
+```
+
+## Kruskal-Wallis Test
+Below, I use the Kruskal-Wallis test to run a non-parametric comparison of each pigment across each snow color. Then, I follow up with a Dunn's post hoc test for the pigments that show significant differences between snow colors. 
+
+```{r}
+# Run kruskal wallis test 
+kruskalResultsAP <- dfPig_long %>%
+  filter(Location == "Antarctic Peninsula") %>% 
+  group_by(Pigment) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ Color, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value)
+  )
+
+# Run Dunn's test 
+kruskalResultsAP <- kruskalResultsAP %>%
+  mutate(
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(Color), data = .x, method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+#### Visualize Results
+```{r}
+dunnPairsAP <- kruskalResultsAP %>%
+  select(Pigment, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlot_AP <- ggplot(dunnPairsAP, aes(x = Comparison, y = Pigment, fill = P.adj)) +
+  geom_tile() +
+  geom_tile(data = filter(dunnPairsAP, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) 
+
+dunnPlot_AP
+
+ggsave(dunnPlot_AP, filename = "dunnPlot_AP.png", width = 7, height = 6, bg = "white")
+```
+
+# Summary Tables {.tabset}
+
+## Primary Pigments
+```{r}
+# Helper function: significant figures + commas + preserve .0 for integers
+fmt_sigfig <- function(x, sig = 4) {
+  # Round to significant figures
+  y <- signif(x, sig)
+  
+  # Convert to string with commas
+  out <- prettyNum(y, big.mark = ",", scientific = FALSE)
+  
+  # Add ".0" if number is an integer after rounding
+  out[grepl("^\\d+$", out)] <- paste0(out[grepl("^\\d+$", out)], ".0")
+  
+  return(out)
+}
+
+# Pigment Summary (ChlA and ChlB)
+ChlSummary <- dfPig %>% 
+  group_by(Color) %>% 
+  summarise(
+    n = n(),
+    ChlA_mean   = fmt_sigfig(mean(ChlA, na.rm = TRUE)),
+    ChlA_median = fmt_sigfig(median(ChlA, na.rm = TRUE)),
+    ChlA_max    = fmt_sigfig(max(ChlA, na.rm = TRUE)),
+    ChlA_min    = fmt_sigfig(min(ChlA, na.rm = TRUE)),
+    ChlA_sd     = fmt_sigfig(sd(ChlA, na.rm = TRUE)),
+    ChlB_mean   = fmt_sigfig(mean(ChlB, na.rm = TRUE)),
+    ChlB_median = fmt_sigfig(median(ChlB, na.rm = TRUE)),
+    ChlB_max    = fmt_sigfig(max(ChlB, na.rm = TRUE)),
+    ChlB_min    = fmt_sigfig(min(ChlB, na.rm = TRUE)),
+    ChlB_sd     = fmt_sigfig(sd(ChlB, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+# Add "all" for each site
+ChlSummaryAll <- dfPig %>%
+  summarise(
+    Color = "all",
+    n = n(),
+    ChlA_mean   = fmt_sigfig(mean(ChlA, na.rm = TRUE)),
+    ChlA_median = fmt_sigfig(median(ChlA, na.rm = TRUE)),
+    ChlA_max    = fmt_sigfig(max(ChlA, na.rm = TRUE)),
+    ChlA_min    = fmt_sigfig(min(ChlA, na.rm = TRUE)),
+    ChlA_sd     = fmt_sigfig(sd(ChlA, na.rm = TRUE)),
+    ChlB_mean   = fmt_sigfig(mean(ChlB, na.rm = TRUE)),
+    ChlB_median = fmt_sigfig(median(ChlB, na.rm = TRUE)),
+    ChlB_max    = fmt_sigfig(max(ChlB, na.rm = TRUE)),
+    ChlB_min    = fmt_sigfig(min(ChlB, na.rm = TRUE)),
+    ChlB_sd     = fmt_sigfig(sd(ChlB, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+# Filter Antarctic red + green
+ChlSummaryAPRG <- dfPig %>%
+  filter(Color %in% c("red", "green")) %>%
+  summarise(
+    Color = "red+green",
+    n = n(),
+    ChlA_mean   = fmt_sigfig(mean(ChlA, na.rm = TRUE)),
+    ChlA_median = fmt_sigfig(median(ChlA, na.rm = TRUE)),
+    ChlA_max    = fmt_sigfig(max(ChlA, na.rm = TRUE)),
+    ChlA_min    = fmt_sigfig(min(ChlA, na.rm = TRUE)),
+    ChlA_sd     = fmt_sigfig(sd(ChlA, na.rm = TRUE)),
+    ChlB_mean   = fmt_sigfig(mean(ChlB, na.rm = TRUE)),
+    ChlB_median = fmt_sigfig(median(ChlB, na.rm = TRUE)),
+    ChlB_max    = fmt_sigfig(max(ChlB, na.rm = TRUE)),
+    ChlB_min    = fmt_sigfig(min(ChlB, na.rm = TRUE)),
+    ChlB_sd     = fmt_sigfig(sd(ChlB, na.rm = TRUE))
+  )
+
+# Combine and order rows
+ChlSummary <- bind_rows(ChlSummaryAll, ChlSummary, ChlSummaryAPRG) %>% 
+  arrange(match(Color, c("green", "red", "red+green", "clean", "all")))
+
+# Format table with kableExtra
+ChlSummary %>% 
+  kable("html", caption = "Summary Statistics for ChlA and ChlB by Snow Color (ng/cell)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+## Carotenoids
+```{r}
+# Pigment Summary (Astaxanthin, Beta Carotene and Lutein)
+CarotenoidSummary <- dfPig %>% 
+  group_by(Color) %>% 
+  summarise(
+    n = n(),
+    Astaxanthin_mean = fmt_sigfig(mean(Astaxanthin, na.rm = TRUE)),
+    Astaxanthin_median = fmt_sigfig(median(Astaxanthin, na.rm = TRUE)),
+    Astaxanthin_max = fmt_sigfig(max(Astaxanthin, na.rm = TRUE)),
+    Astaxanthin_min = fmt_sigfig(min(Astaxanthin, na.rm = TRUE)),
+    Astaxanthin_sd = fmt_sigfig(sd(Astaxanthin, na.rm = TRUE)),
+    Lutein_mean = fmt_sigfig(mean(Lutein, na.rm = TRUE)),
+    Lutein_median = fmt_sigfig(median(Lutein, na.rm = TRUE)),
+    Lutein_max = fmt_sigfig(max(Lutein, na.rm = TRUE)),
+    Lutein_min = fmt_sigfig(min(Lutein, na.rm = TRUE)),
+    Lutein_sd = fmt_sigfig(sd(Lutein, na.rm = TRUE)),
+    BetaC_mean = fmt_sigfig(mean(BetaC, na.rm = TRUE)),
+    BetaC_median = fmt_sigfig(median(BetaC, na.rm = TRUE)),
+    BetaC_max = fmt_sigfig(max(BetaC, na.rm = TRUE)),
+    BetaC_min = fmt_sigfig(min(BetaC, na.rm = TRUE)),
+    BetaC_sd = fmt_sigfig(sd(BetaC, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+# Add "all" for each site
+CarotenoidSummaryAll <- dfPig %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    Astaxanthin_mean = fmt_sigfig(mean(Astaxanthin, na.rm = TRUE)),
+    Astaxanthin_median = fmt_sigfig(median(Astaxanthin, na.rm = TRUE)),
+    Astaxanthin_max = fmt_sigfig(max(Astaxanthin, na.rm = TRUE)),
+    Astaxanthin_min = fmt_sigfig(min(Astaxanthin, na.rm = TRUE)),
+    Astaxanthin_sd = fmt_sigfig(sd(Astaxanthin, na.rm = TRUE)),
+    Lutein_mean = fmt_sigfig(mean(Lutein, na.rm = TRUE)),
+    Lutein_median = fmt_sigfig(median(Lutein, na.rm = TRUE)),
+    Lutein_max = fmt_sigfig(max(Lutein, na.rm = TRUE)),
+    Lutein_min = fmt_sigfig(min(Lutein, na.rm = TRUE)),
+    Lutein_sd = fmt_sigfig(sd(Lutein, na.rm = TRUE)),
+    BetaC_mean = fmt_sigfig(mean(BetaC, na.rm = TRUE)),
+    BetaC_median = fmt_sigfig(median(BetaC, na.rm = TRUE)),
+    BetaC_max = fmt_sigfig(max(BetaC, na.rm = TRUE)),
+    BetaC_min = fmt_sigfig(min(BetaC, na.rm = TRUE)),
+    BetaC_sd = fmt_sigfig(sd(BetaC, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+# Filter Antarctic red + green
+CarotenoidSummaryAPRG <- dfPig %>%
+  filter(Color %in% c("red", "green")) %>%
+  summarise(
+    Color = "red+green",
+    n = n(),
+    Astaxanthin_mean = fmt_sigfig(mean(Astaxanthin, na.rm = TRUE)),
+    Astaxanthin_median = fmt_sigfig(median(Astaxanthin, na.rm = TRUE)),
+    Astaxanthin_max = fmt_sigfig(max(Astaxanthin, na.rm = TRUE)),
+    Astaxanthin_min = fmt_sigfig(min(Astaxanthin, na.rm = TRUE)),
+    Astaxanthin_sd = fmt_sigfig(sd(Astaxanthin, na.rm = TRUE)),
+    Lutein_mean = fmt_sigfig(mean(Lutein, na.rm = TRUE)),
+    Lutein_median = fmt_sigfig(median(Lutein, na.rm = TRUE)),
+    Lutein_max = fmt_sigfig(max(Lutein, na.rm = TRUE)),
+    Lutein_min = fmt_sigfig(min(Lutein, na.rm = TRUE)),
+    Lutein_sd = fmt_sigfig(sd(Lutein, na.rm = TRUE)),
+    BetaC_mean = fmt_sigfig(mean(BetaC, na.rm = TRUE)),
+    BetaC_median = fmt_sigfig(median(BetaC, na.rm = TRUE)),
+    BetaC_max = fmt_sigfig(max(BetaC, na.rm = TRUE)),
+    BetaC_min = fmt_sigfig(min(BetaC, na.rm = TRUE)),
+    BetaC_sd = fmt_sigfig(sd(BetaC, na.rm = TRUE))
+  )
+
+# Combine and order rows
+CarotenoidSummary <- bind_rows(CarotenoidSummaryAll, CarotenoidSummary, CarotenoidSummaryAPRG) %>% 
+  arrange(match(Color, c("green", "red", "red+green", "clean", "all")))
+
+# Format table with kableExtra
+CarotenoidSummary %>% 
+  kable("html", caption = "Summary Statistics for Astaxanthin and Lutein by Snow Color (ng/cell)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+
+## Degradation Products 
+```{r}
+# Pigment Summary (Pheophytin and Pheophorbide)
+DegSummary <- dfPig %>% 
+  group_by(Color) %>% 
+  summarise(
+    n = n(),
+    Pheophytin_mean = fmt_sigfig(mean(Pheophytin, na.rm = TRUE)),
+    Pheophytin_median = fmt_sigfig(median(Pheophytin, na.rm = TRUE)),
+    Pheophytin_max = fmt_sigfig(max(Pheophytin, na.rm = TRUE)),
+    Pheophytin_min = fmt_sigfig(min(Pheophytin, na.rm = TRUE)),
+    Pheophytin_sd = fmt_sigfig(sd(Pheophytin, na.rm = TRUE)),
+    Pheophorbide_mean = fmt_sigfig(mean(Pheophorbide, na.rm = TRUE)),
+    Pheophorbide_median = fmt_sigfig(median(Pheophorbide, na.rm = TRUE)),
+    Pheophorbide_max = fmt_sigfig(max(Pheophorbide, na.rm = TRUE)),
+    Pheophorbide_min = fmt_sigfig(min(Pheophorbide, na.rm = TRUE)),
+    Pheophorbide_sd = fmt_sigfig(sd(Pheophorbide, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+# Add "all" for each site
+DegSummaryAll <- dfPig %>%
+  summarise(
+    Color = "all",
+    n = n(),
+    Pheophytin_mean = fmt_sigfig(mean(Pheophytin, na.rm = TRUE)),
+    Pheophytin_median = fmt_sigfig(median(Pheophytin, na.rm = TRUE)),
+    Pheophytin_max = fmt_sigfig(max(Pheophytin, na.rm = TRUE)),
+    Pheophytin_min = fmt_sigfig(min(Pheophytin, na.rm = TRUE)),
+    Pheophytin_sd = fmt_sigfig(sd(Pheophytin, na.rm = TRUE)),
+    Pheophorbide_mean = fmt_sigfig(mean(Pheophorbide, na.rm = TRUE)),
+    Pheophorbide_median = fmt_sigfig(median(Pheophorbide, na.rm = TRUE)),
+    Pheophorbide_max = fmt_sigfig(max(Pheophorbide, na.rm = TRUE)),
+    Pheophorbide_min = fmt_sigfig(min(Pheophorbide, na.rm = TRUE)),
+    Pheophorbide_sd = fmt_sigfig(sd(Pheophorbide, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+# Filter Antarctic red + green
+DegSummaryAPRG <- dfPig %>%
+  filter(Color %in% c("red", "green")) %>%
+  summarise(
+    Location = "Antarctic Peninsula",
+    Color = "red+green",
+    n = n(),
+    Pheophytin_mean = fmt_sigfig(mean(Pheophytin, na.rm = TRUE)),
+    Pheophytin_median = fmt_sigfig(median(Pheophytin, na.rm = TRUE)),
+    Pheophytin_max = fmt_sigfig(max(Pheophytin, na.rm = TRUE)),
+    Pheophytin_min = fmt_sigfig(min(Pheophytin, na.rm = TRUE)),
+    Pheophytin_sd = fmt_sigfig(sd(Pheophytin, na.rm = TRUE)),
+    Pheophorbide_mean = fmt_sigfig(mean(Pheophorbide, na.rm = TRUE)),
+    Pheophorbide_median = fmt_sigfig(median(Pheophorbide, na.rm = TRUE)),
+    Pheophorbide_max = fmt_sigfig(max(Pheophorbide, na.rm = TRUE)),
+    Pheophorbide_min = fmt_sigfig(min(Pheophorbide, na.rm = TRUE)),
+    Pheophorbide_sd = fmt_sigfig(sd(Pheophorbide, na.rm = TRUE))
+  )
+
+# Combine and order rows
+DegSummary <- bind_rows(DegSummaryAll, DegSummary, DegSummaryAPRG) %>% 
+  arrange(match(Color, c("green", "red", "red+green", "clean", "all")))
+
+# Format table with kableExtra
+DegSummary %>% 
+  kable("html", caption = "Summary Statistics for Pheophytin and Pheophorbide by Snow Color (ppb)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+# Box Plots {.tabset}
+
+## All Pigments
+
+```{r}
+boxplotAll <- dfPig_long %>%
+  ggplot(aes(x = Pigment, y = Concentration, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.9,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotAll
+
+ggsave(boxplotAll, filename = "boxplotAll.png", width = 7, height = 5, bg = "white")
+```
+
+## Astaxanthin
+
+```{r}
+boxplotAstax <- dfPig %>%
+  ggplot(aes(x = Region, y = Astaxanthin, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.9,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotAstax
+
+ggsave(boxplotAstax, filename = "boxplotAstax.png", width = 7, height = 5, bg = "white")
+```
+
+## Beta Carotene
+
+```{r}
+boxplotBetaC <- dfPig %>%
+  ggplot(aes(x = Region, y = BetaC, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.9,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotBetaC
+
+ggsave(boxplotBetaC, filename = "boxplotBetaC.png", width = 7, height = 5, bg = "white")
+```
+
+## ChlA
+
+```{r}
+boxplotChlA <- dfPig %>%
+  ggplot(aes(x = Region, y = ChlA, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.9,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotChlA
+
+ggsave(boxplotChlA, filename = "boxplotChlA.png", width = 7, height = 5, bg = "white")
+```
+
+## ChlB
+
+```{r}
+boxplotChlB <- dfPig %>%
+  ggplot(aes(x = Region, y = ChlB, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.9,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotChlB
+
+ggsave(boxplotChlB, filename = "boxplotChlB.png", width = 7, height = 5, bg = "white")
+```
+
+## Lutein
+
+```{r}
+boxplotLutein <- dfPig %>%
+  ggplot(aes(x = Region, y = Lutein, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.9,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotLutein
+
+ggsave(boxplotLutein, filename = "boxplotLutein.png", width = 7, height = 5, bg = "white")
+```
+
+## Pheophorbide
+
+```{r}
+boxplotPheophorbide <- dfPig %>%
+  ggplot(aes(x = Region, y = Pheophorbide, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.9,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotPheophorbide
+
+ggsave(boxplotPheophorbide, filename = "boxplotPheophorbide.png", width = 7, height = 5, bg = "white")
+```
+
+## Pheophytin
+
+```{r}
+boxplotPheophytin <- dfPig %>%
+  ggplot(aes(x = Region, y = Pheophytin, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.9,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotPheophytin
+
+ggsave(boxplotPheophytin, filename = "boxplotPheophytin.png", width = 7, height = 5, bg = "white")
+```
+
+# Pairs Plots - Pigments
+
+```{r, warning = FALSE, message = FALSE}
+corplotAll <- ggpairs(
+  dfPig,  
+  columns = c("Astaxanthin", "Lutein", "ChlA", "ChlB", "BetaC", "Pheophorbide", "Pheophytin"), 
+  aes(color = Color, fill = Color, alpha = 0.8),
+  diag = list(continuous = wrap("barDiag")),
+  lower = list(continuous = wrap("points", na.rm = TRUE)),
+  upper = list(continuous = wrap("cor", size = 3, na.rm = TRUE))
+) + 
+  theme_minimal() +
+  pairsplot_theme + 
+  scale_color_manual(values = colorPal) + 
+  scale_fill_manual(values = colorPal) 
+   
+
+corplotAll
+
+ggsave(corplotAll, filename = "corplotAll.png", width = 7, height = 7, bg = "white")
+```
+
+# Heat Maps - Pigments {.tabset}
+
+## All Sites (All Samples)
+```{r}
+cor.mtest <- function(mat, method = "spearman") {
+  mat <- as.matrix(mat)
+  n <- ncol(mat)
+  p.mat <- matrix(NA, n, n)
+  diag(p.mat) <- 0
+  for (i in 1:(n - 1)) {
+    for (j in (i + 1):n) {
+      tmp <- cor.test(mat[, i], mat[, j], method = method)
+      p.mat[i, j] <- p.mat[j, i] <- tmp$p.value
+    }
+  }
+  colnames(p.mat) <- rownames(p.mat) <- colnames(mat)
+  return(list(p = p.mat))
+}
+
+# Define pigment variables
+pigment_vars <- c("Astaxanthin", "Lutein", "ChlA", "ChlB", "BetaC", "Pheophorbide", "Pheophytin")
+
+# List of locations
+locations <- unique(dfPig$LocAbbrev)
+
+# Function to calculate correlation matrices for each location
+get_corr_data <- function(location) {
+  data_sub <- dfPig %>%
+    filter(LocAbbrev == location) %>%
+    select(all_of(pigment_vars)) %>%
+    na.omit()
+
+  cor_matrix <- cor(data_sub, method = "spearman")
+  p_matrix <- cor.mtest(data_sub, method = "spearman")$p
+
+  cor_long <- reshape2::melt(cor_matrix)
+  p_long <- reshape2::melt(p_matrix)
+
+  merged <- merge(cor_long, p_long, by = c("Var1", "Var2"))
+  colnames(merged) <- c("Variable1", "Variable2", "Spearman_r", "p_value")
+  merged$Location <- location
+
+  return(merged)
+}
+
+# Apply across locations
+heatmap_data <- do.call(rbind, lapply(locations, get_corr_data))
+
+# Factor levels for correct ordering
+heatmap_data$Variable1 <- factor(heatmap_data$Variable1, levels = pigment_vars)
+heatmap_data$Variable2 <- factor(heatmap_data$Variable2, levels = pigment_vars)
+
+# Create label
+heatmap_data$label <- paste0(round(heatmap_data$Spearman_r, 2), "\n(p=", round(heatmap_data$p_value, 3), ")")
+heatmap_data$significant <- heatmap_data$p_value < 0.05
+
+# Remove upper triangle + diagonal if desired (optional)
+heatmap_data <- heatmap_data %>%
+  filter(as.numeric(Variable1) > as.numeric(Variable2))
+
+# Plot
+heatmapPigAll <- ggplot(heatmap_data, aes(x = Variable1, y = Variable2, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = subset(heatmap_data, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  facet_wrap(~Location) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_blank()) 
+
+heatmapPigAll
+
+ggsave(heatmapPigAll, filename = "heatmapPigAll.png", width = 11.5, height = 7, bg = "white")
+
+```
+
+## All Sites (Algae Samples)
+```{r}
+cor.mtest <- function(mat, method = "spearman") {
+  mat <- as.matrix(mat)
+  n <- ncol(mat)
+  p.mat <- matrix(NA, n, n)
+  diag(p.mat) <- 0
+  for (i in 1:(n - 1)) {
+    for (j in (i + 1):n) {
+      tmp <- cor.test(mat[, i], mat[, j], method = method)
+      p.mat[i, j] <- p.mat[j, i] <- tmp$p.value
+    }
+  }
+  colnames(p.mat) <- rownames(p.mat) <- colnames(mat)
+  return(list(p = p.mat))
+}
+
+# Define pigment variables
+pigment_vars <- c("Astaxanthin", "Lutein", "ChlA", "ChlB", "BetaC", "Pheophorbide", "Pheophytin")
+
+# List of locations
+locations <- unique(dfPig$LocAbbrev)
+
+# Function to calculate correlation matrices for each location
+get_corr_data <- function(location) {
+  data_sub <- dfPig %>%
+    filter(Algae == "algae") %>% 
+    filter(LocAbbrev == location) %>%
+    select(all_of(pigment_vars)) %>%
+    na.omit()
+
+  cor_matrix <- cor(data_sub, method = "spearman")
+  p_matrix <- cor.mtest(data_sub, method = "spearman")$p
+
+  cor_long <- reshape2::melt(cor_matrix)
+  p_long <- reshape2::melt(p_matrix)
+
+  merged <- merge(cor_long, p_long, by = c("Var1", "Var2"))
+  colnames(merged) <- c("Variable1", "Variable2", "Spearman_r", "p_value")
+  merged$Location <- location
+
+  return(merged)
+}
+
+# Apply across locations
+heatmap_data <- do.call(rbind, lapply(locations, get_corr_data))
+
+# Factor levels for correct ordering
+heatmap_data$Variable1 <- factor(heatmap_data$Variable1, levels = pigment_vars)
+heatmap_data$Variable2 <- factor(heatmap_data$Variable2, levels = pigment_vars)
+
+# Create label
+heatmap_data$label <- paste0(round(heatmap_data$Spearman_r, 2), "\n(p=", round(heatmap_data$p_value, 3), ")")
+heatmap_data$significant <- heatmap_data$p_value < 0.05
+
+# Remove upper triangle + diagonal if desired (optional)
+heatmap_data <- heatmap_data %>%
+  filter(as.numeric(Variable1) > as.numeric(Variable2))
+
+# Plot
+heatmapPigAlgae <- ggplot(heatmap_data, aes(x = Variable1, y = Variable2, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = subset(heatmap_data, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  facet_wrap(~Location) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_blank()) 
+
+heatmapPigAlgae
+
+ggsave(heatmapPigAlgae, filename = "heatmapPigAlgae.png", width = 11.5, height = 7, bg = "white")
+
+```
+
+## All Sites (Clean Samples)
+```{r}
+cor.mtest <- function(mat, method = "spearman") {
+  mat <- as.matrix(mat)
+  n <- ncol(mat)
+  p.mat <- matrix(NA, n, n)
+  diag(p.mat) <- 0
+  for (i in 1:(n - 1)) {
+    for (j in (i + 1):n) {
+      tmp <- cor.test(mat[, i], mat[, j], method = method)
+      p.mat[i, j] <- p.mat[j, i] <- tmp$p.value
+    }
+  }
+  colnames(p.mat) <- rownames(p.mat) <- colnames(mat)
+  return(list(p = p.mat))
+}
+
+# Define pigment variables
+pigment_vars <- c("Astaxanthin", "Lutein", "ChlA", "ChlB", "BetaC", "Pheophorbide", "Pheophytin")
+
+# List of locations
+locations <- unique(dfPig$LocAbbrev)
+
+# Function to calculate correlation matrices for each location
+get_corr_data <- function(location) {
+  data_sub <- dfPig %>%
+    filter(Algae == "clean") %>% 
+    filter(LocAbbrev == location) %>%
+    select(all_of(pigment_vars)) %>%
+    na.omit()
+
+  cor_matrix <- cor(data_sub, method = "spearman")
+  p_matrix <- cor.mtest(data_sub, method = "spearman")$p
+
+  cor_long <- reshape2::melt(cor_matrix)
+  p_long <- reshape2::melt(p_matrix)
+
+  merged <- merge(cor_long, p_long, by = c("Var1", "Var2"))
+  colnames(merged) <- c("Variable1", "Variable2", "Spearman_r", "p_value")
+  merged$Location <- location
+
+  return(merged)
+}
+
+# Apply across locations
+heatmap_data <- do.call(rbind, lapply(locations, get_corr_data))
+
+# Factor levels for correct ordering
+heatmap_data$Variable1 <- factor(heatmap_data$Variable1, levels = pigment_vars)
+heatmap_data$Variable2 <- factor(heatmap_data$Variable2, levels = pigment_vars)
+
+# Create label
+heatmap_data$label <- paste0(round(heatmap_data$Spearman_r, 2), "\n(p=", round(heatmap_data$p_value, 3), ")")
+heatmap_data$significant <- heatmap_data$p_value < 0.05
+
+# Remove upper triangle + diagonal if desired (optional)
+heatmap_data <- heatmap_data %>%
+  filter(as.numeric(Variable1) > as.numeric(Variable2))
+
+# Plot
+heatmapPigClean <- ggplot(heatmap_data, aes(x = Variable1, y = Variable2, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = subset(heatmap_data, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  facet_wrap(~Location) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_blank()) 
+
+heatmapPigClean
+
+ggsave(heatmapPigClean, filename = "heatmapPigClean.png", width = 11.5, height = 7, bg = "white")
+
+```
+
+## Antarctic Peninsula (Red vs. Green)
+```{r}
+
+cor.mtest <- function(mat, method = "spearman") {
+  mat <- as.matrix(mat)
+  n <- ncol(mat)
+  p.mat <- matrix(NA, n, n)
+  diag(p.mat) <- 0
+  for (i in 1:(n - 1)) {
+    for (j in (i + 1):n) {
+      tmp <- cor.test(mat[, i], mat[, j], method = method)
+      p.mat[i, j] <- p.mat[j, i] <- tmp$p.value
+    }
+  }
+  colnames(p.mat) <- rownames(p.mat) <- colnames(mat)
+  return(list(p = p.mat))
+}
+
+# Define pigment variables
+pigment_vars <- c("Astaxanthin", "Lutein", "ChlA", "ChlB", "BetaC", "Pheophorbide", "Pheophytin")
+
+# Filter data once for Antarctic Peninsula red and green samples
+df_filtered <- dfPig %>%
+  filter(Location == "Antarctic Peninsula",
+         Color %in% c("red", "green"))
+
+# Unique colors to iterate over
+colors <- unique(df_filtered$Color)
+
+# Function to calculate correlation matrices for each color group
+get_corr_data <- function(color_group) {
+  data_sub <- df_filtered %>%
+    filter(Color == color_group) %>%
+    select(all_of(pigment_vars)) %>%
+    na.omit()
+  
+  cor_matrix <- cor(data_sub, method = "spearman")
+  p_matrix <- cor.mtest(data_sub, method = "spearman")$p
+  
+  cor_long <- reshape2::melt(cor_matrix)
+  p_long <- reshape2::melt(p_matrix)
+  
+  merged <- merge(cor_long, p_long, by = c("Var1", "Var2"))
+  colnames(merged) <- c("Variable1", "Variable2", "Spearman_r", "p_value")
+  merged$Color <- color_group
+  
+  return(merged)
+}
+
+# Get correlation data for each color
+heatmap_data_list <- lapply(colors, get_corr_data)
+heatmap_data <- do.call(rbind, heatmap_data_list)
+
+# Set factor levels for ordering
+heatmap_data$Variable1 <- factor(heatmap_data$Variable1, levels = pigment_vars)
+heatmap_data$Variable2 <- factor(heatmap_data$Variable2, levels = pigment_vars)
+
+# Create labels for plot
+heatmap_data$label <- paste0(round(heatmap_data$Spearman_r, 2), "\n(p=", round(heatmap_data$p_value, 3), ")")
+heatmap_data$significant <- heatmap_data$p_value < 0.05
+
+# Keep only lower triangle (optional)
+heatmap_data <- heatmap_data %>%
+  filter(as.numeric(Variable1) > as.numeric(Variable2))
+
+# Plot faceted by Color
+heatmapPigAPRG <- ggplot(heatmap_data, aes(x = Variable1, y = Variable2, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = subset(heatmap_data, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  facet_wrap(~Color) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_blank())
+  
+heatmapPigAPRG
+ggsave(heatmapPigAPRG, filename = "heatmapPigAPRG.png", width = 9, height = 5, bg = "white")
+```
+
+# Principal Components Analysis - Pigments
+From the above plots, it seems as though pigment data are relatively linear. I am going to proceed with a PCA ordination over a nonparametric ordination, like nMDS. 
+
+## Standardize Data & Run PCA
+Below, I use prcomp to standardize pigment data and run a PCA. Even though the pigment concentrations are on the same scale, some pigments are present in much higher concentrations than others. Because of this, I will standardize pigments so they are all on the same scale.
+
+PC1 explains 55.11% of the variance in pigment concentration. PC2 explains 21.60% of the variance in pigment concentration. Collectively, these two components explain 76.71% of the variance, and I will likely only include these two PCs in my visualizations. 
+
+```{r}
+Pigments <- dfAnion[9:15]
+
+# Standardize
+PigPCA <- prcomp(Pigments, scale = TRUE)
+
+summary(PigPCA)
+```
+
+## Biplots
+
+```{r}
+biplot(PigPCA)
+```
+
+## PC Interpretation and Exploration 
+
+```{r}
+PigPCA$rotation[,1:3]
+```
+
+## Ordination Plots {.tabset}
+```{r}
+## Add PC1 &2 to dataset
+dfAnion$PC1 <- PigPCA$x[,1]
+dfAnion$PC2 <- PigPCA$x[,2]
+dfAnion$PC3 <- PigPCA$x[,3]
+```
+
+```{r}
+ordplotPigColor <- dfAnion %>% 
+  ggplot(aes(x = PC1, y = PC2, color = Color, fill = Color)) + 
+  geom_point(alpha = 0.7, size = 2.5) + 
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(x = "PC1 (55.11%)", 
+       y = "PC2 (21.60%)",
+       fill = NULL,
+       color = NULL) + 
+  theme_minimal() + 
+  plot_theme
+
+ordplotPigColor
+
+ggsave(ordplotPigColor, filename = "ordplotPigColor.png", width = 7, height = 5, bg = "white")
+```
+
+## Fit Anions to Ordination
+In this section, I am going to fit the nutrient variables onto the PCA ordination.
+
+None of the anions fit onto the ordination 
+```{r}
+anions <- dfAnion[16:20]
+
+anionsScaled <- scale(anions)
+
+pigAnionEnvfit <- envfit(PigPCA, anionsScaled)
+pigAnionEnvfit
+```
+
+# Pairs Plots - Pigments and Anions
+
+## Photosynthetic
+
+```{r, warning = FALSE, message = FALSE}
+corplotAPChl <- dfAnion %>% 
+  ggpairs(  
+  columns = c("ChlA", "ChlB", "Fo", "Cl", "NO2NO3", "PO43", "SO42"), 
+  aes(color = Color, fill = Color, alpha = 0.8),
+  diag = list(continuous = wrap("barDiag")),
+  lower = list(continuous = wrap("points", na.rm = TRUE)),
+  upper = list(continuous = wrap("cor", size = 3, na.rm = TRUE, method = "spearman"))
+) + 
+  theme_minimal() +
+  pairsplot_theme + 
+  scale_color_manual(values = colorPal) + 
+  scale_fill_manual(values = colorPal) 
+   
+
+corplotAPChl
+
+ggsave(corplotAPChl, filename = "corplotAPChl.png", width = 7, height = 7, bg = "white")
+```
+
+## Photoprotective
+
+```{r, warning = FALSE, message = FALSE}
+corplotAPPhotoprotective <- dfAnion %>% 
+  ggpairs(  
+  columns = c("Astaxanthin", "Lutein", "BetaC", "Fo", "Cl", "NO2NO3", "PO43", "SO42"), 
+  aes(color = Color, fill = Color, alpha = 0.8),
+  diag = list(continuous = wrap("barDiag")),
+  lower = list(continuous = wrap("points", na.rm = TRUE)),
+  upper = list(continuous = wrap("cor", size = 3, na.rm = TRUE, method = "spearman"))
+) + 
+  theme_minimal() +
+  pairsplot_theme + 
+  scale_color_manual(values = colorPal) + 
+  scale_fill_manual(values = colorPal) 
+   
+
+corplotAPPhotoprotective
+
+ggsave(corplotAPPhotoprotective, filename = "corplotAPPhotoprotective.png", width = 7, height = 7, bg = "white")
+```
+
+## Degradation
+
+```{r, warning = FALSE, message = FALSE}
+corplotAPDegradation <- dfAnion %>% 
+  ggpairs(  
+  columns = c("Pheophorbide", "Pheophytin", "Fo", "Cl", "NO2NO3", "PO43", "SO42"), 
+  aes(color = Color, fill = Color, alpha = 0.8),
+  diag = list(continuous = wrap("barDiag")),
+  lower = list(continuous = wrap("points", na.rm = TRUE)),
+  upper = list(continuous = wrap("cor", size = 3, na.rm = TRUE, method = "spearman"))
+) + 
+  theme_minimal() +
+  pairsplot_theme + 
+  scale_color_manual(values = colorPal) + 
+  scale_fill_manual(values = colorPal) 
+   
+
+corplotAPDegradation
+
+ggsave(corplotAPDegradation, filename = "corplotAPDegradation.png", width = 7, height = 7, bg = "white")
+```
+
+# Heat Maps - Pigments & Anions {.tabset}
+
+```{r}
+# Define pigment and anion variables
+pigment_vars <- c("ChlA", "ChlB", "Astaxanthin", "Lutein", "BetaC", "Pheophorbide", "Pheophytin")
+anion_vars <- c("Cl", "NO2NO3", "SO42", "PO43", "Fo")
+
+# Correlation function
+get_pigment_anion_corr <- function(data, group_name) {
+
+  cor_mat <- rcorr(as.matrix(data), type = "spearman")
+
+  r_vals <- cor_mat$r
+  p_vals <- cor_mat$P
+
+  expand.grid(
+    Pigment = pigment_vars,
+    Anion   = anion_vars,
+    stringsAsFactors = FALSE
+  ) %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[Anion, Pigment],
+      p_value    = p_vals[Anion, Pigment],
+      significant = p_value < 0.05,
+      label = paste0(
+        round(Spearman_r, 2),
+        "\n(p=", round(p_value, 3), ")"
+      ),
+      Group = group_name
+    ) %>%
+    ungroup()
+}
+
+# Red & Green (separate) 
+cor_color <- dfAnion %>%
+  filter(Color %in% c("red", "green")) %>%
+  select(Color, Algae, all_of(pigment_vars), all_of(anion_vars)) %>%
+  na.omit() %>%
+  group_split(Color) %>%
+  map_dfr(~get_pigment_anion_corr(
+    data = .x %>% select(-Color, -Algae),
+    group_name = unique(.x$Color)
+  ))
+
+# Algae (red + green pooled)
+cor_algae <- dfAnion %>%
+  filter(Algae == "algae") %>%
+  select(all_of(pigment_vars), all_of(anion_vars)) %>%
+  na.omit() %>%
+  get_pigment_anion_corr("algae")
+
+# All samples (red + green + clean) 
+cor_all <- dfAnion %>%
+  select(all_of(pigment_vars), all_of(anion_vars)) %>%
+  na.omit() %>%
+  get_pigment_anion_corr("all")
+
+# Combine 
+cor_results_all <- bind_rows(cor_color, cor_algae, cor_all)
+
+# Factor ordering
+cor_results_all$Pigment <- factor(cor_results_all$Pigment, levels = pigment_vars)
+cor_results_all$Anion   <- factor(cor_results_all$Anion, levels = anion_vars)
+cor_results_all$Group   <- factor(
+  cor_results_all$Group,
+  levels = c("red", "green", "algae", "all")
+)
+
+# Plot 
+heatmapPigAnionAP <- ggplot(
+  cor_results_all,
+  aes(x = Pigment, y = Anion, fill = Spearman_r)
+) +
+  geom_tile() +
+  geom_tile(
+    data = filter(cor_results_all, significant),
+    color = "black",
+    linewidth = 0.75
+  ) +
+  geom_text(aes(label = label), size = 3) +
+  facet_wrap(~Group, ncol = 1) +
+  scale_fill_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    name = "Spearman r"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  )
+
+heatmapPigAnionAP
+
+# Save 
+ggsave(
+  heatmapPigAnionAP,
+  filename = "heatmapPigAnionAP.png",
+  width = 7,
+  height = 10,
+  bg = "white"
+)
+```
+
+# Cell Density, Volume & Cellular Pigment Concentration
+
+## Pairs Plots 
+
+```{r, warning = FALSE, message = FALSE}
+corplotAPCell <- dfPigCell %>%  
+  ggpairs(  
+  columns = c("CellDensity", "CellVolume", "Astaxanthin", "Lutein", "ChlA", "ChlB", "BetaC", "Pheophorbide", "Pheophytin"), 
+  aes(color = Color, fill = Color, alpha = 0.8),
+  diag = list(continuous = wrap("barDiag")),
+  lower = list(continuous = wrap("points", na.rm = TRUE)),
+  upper = list(continuous = wrap("cor", size = 3, na.rm = TRUE, method = "spearman"))
+) + 
+  theme_minimal() +
+  pairsplot_theme + 
+  scale_color_manual(values = colorPal) + 
+  scale_fill_manual(values = colorPal) 
+   
+
+corplotAPCell
+
+ggsave(corplotAPCell, filename = "corplotAPCell.png", width = 7, height = 7, bg = "white")
+```
+
+## Heat Maps {.tabset}
+
+```{r}
+# Define pigment and cell variables
+pigment_vars <- c("ChlA", "ChlB", "Astaxanthin", "Lutein", 
+                  "BetaC", "Pheophorbide", "Pheophytin")
+cell_vars <- c("CellDensity", "CellVolume")
+
+# ---- Build datasets for each tier ----
+
+# All samples combined (red + green + clean)
+df_all <- dfPigCell %>%
+  filter(Location == "Antarctic Peninsula") %>%
+  mutate(Tier = "All samples") %>%
+  select(Tier, all_of(pigment_vars), all_of(cell_vars)) %>%
+  na.omit()
+
+# Green only
+df_green <- dfPigCell %>%
+  filter(Location == "Antarctic Peninsula", Color == "green") %>%
+  mutate(Tier = "Green") %>%
+  select(Tier, all_of(pigment_vars), all_of(cell_vars)) %>%
+  na.omit()
+
+# Red only
+df_red <- dfPigCell %>%
+  filter(Location == "Antarctic Peninsula", Color == "red") %>%
+  mutate(Tier = "Red") %>%
+  select(Tier, all_of(pigment_vars), all_of(cell_vars)) %>%
+  na.omit()
+
+# Combine all tiers into one dataframe
+df_combined <- bind_rows(df_all, df_green, df_red)
+
+# ---- Function to compute pigment–cell Spearman correlations ----
+get_pigment_Cell_corr <- function(data, tier_name) {
+
+  cor_matrix <- rcorr(as.matrix(data[, -1]), type = "spearman")
+
+  r_vals <- cor_matrix$r
+  p_vals <- cor_matrix$P
+
+  pairs <- expand.grid(
+    Pigment = pigment_vars,
+    Cell    = cell_vars,
+    stringsAsFactors = FALSE
+  )
+
+  results <- pairs %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[Cell, Pigment],
+      p_value    = p_vals[Cell, Pigment],
+      significant = p_value < 0.05,
+      label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+      Tier = tier_name
+    ) %>%
+    ungroup()
+
+  return(results)
+}
+
+# ---- Compute correlations for each tier ----
+cor_results <- df_combined %>%
+  group_split(Tier) %>%
+  map_dfr(~get_pigment_Cell_corr(.x, unique(.x$Tier)))
+
+# Preserve axis and facet order
+cor_results$Pigment <- factor(cor_results$Pigment, levels = pigment_vars)
+cor_results$Cell    <- factor(cor_results$Cell, levels = cell_vars)
+cor_results$Tier    <- factor(
+  cor_results$Tier,
+  levels = c("All samples", "Green", "Red")
+)
+
+# ---- Plot heatmap ----
+heatmapPigCellAP <- ggplot(
+  cor_results,
+  aes(x = Pigment, y = Cell, fill = Spearman_r)
+) +
+  geom_tile() +
+  geom_tile(
+    data = filter(cor_results, significant),
+    color = "black",
+    linewidth = 0.75
+  ) +
+  geom_text(aes(label = label), size = 3) +
+  facet_wrap(~Tier, ncol = 1) +
+  scale_fill_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    name = "Spearman r"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  )
+
+heatmapPigCellAP
+
+# Save
+ggsave(
+  heatmapPigCellAP,
+  filename = "heatmapPigCellAP.png",
+  width = 7,
+  height = 9,
+  bg = "white"
+)
+```
+
+
+# Publication Figures
+
+## Algal Properties by Region {.tabset}
+
+### Cell Density
+```{r}
+boxplotCellDensityPub <- dfPigCell %>% 
+  mutate(
+    Site = factor(Region, levels = c("North", "South")),
+    Color = factor(Color, levels = c("green", "red", "clean"))) %>% 
+  ggplot(aes(x = Site, y = CellDensity, fill = Color, color = Color)) + 
+  geom_boxplot(alpha = 0.9, width = 0.8) + 
+  scale_fill_manual(values = colorPal) + 
+  scale_color_manual(values = colorPal) + 
+  labs(
+    x = NULL, 
+    y = expression("Cell Density" ~ "(cells·mL"^{-1}*")"),
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt(breaks = c(0, 3e+04, 2e+05, 5e+05, 1e+06, 2e+06, 4e+06)) +
+  theme_minimal() +
+  plot_themePub +
+  theme(axis.text.x = element_text(margin = margin(t = 5)),
+        legend.position = "none") +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    ))
+  
+boxplotCellDensityPub
+```
+
+### Cell Volume
+```{r}
+boxplotCellVolumePub <- dfPigCell %>% 
+  filter(CellVolume > 0) %>% 
+  mutate(Site = factor(Region, levels = c("North", "South")),
+    Color = factor(Color, levels = c("green", "red", "clean"))) %>% 
+  ggplot(aes(x = Site, y = CellVolume, fill = Color, color = Color)) + 
+  geom_boxplot(alpha = 0.9, width = 0.8) + 
+  scale_fill_manual(values = colorPal) + 
+  scale_color_manual(values = colorPal) + 
+  labs(
+    x = NULL, 
+    y = expression("Cell Volume" ~ "(μm"^{3}*")"),
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt(breaks = c(0, 1000, 2500, 5000, 10000, 20000, 30000),
+               labels = label_comma()) +
+  theme_minimal() +
+  plot_themePub +
+  theme(axis.text.x = element_text(margin = margin(t = 5)),
+        legend.position = "none") +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    ))
+  
+boxplotCellVolumePub
+```
+
+### Astaxanthin
+```{r}
+boxplotAstaxPub <- dfPig %>% 
+  mutate(Site = factor(Region, levels = c("North", "South")),
+    Color = factor(Color, levels = c("green", "red", "clean"))) %>% 
+  ggplot(aes(x = Site, y = Astaxanthin, fill = Color, color = Color)) + 
+  geom_boxplot(alpha = 0.9, width = 0.8) + 
+  scale_fill_manual(values = colorPal) + 
+  scale_color_manual(values = colorPal) + 
+  labs(
+    x = NULL, 
+    y = expression("Astaxanthin" ~ "(ng·cell"^{-1}*")"),
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt(breaks = c(0, 0.5, 2.5, 5, 10, 20, 30, 40, 50),
+               labels = function(x) ifelse(x < 5, x, as.integer(x))) +
+  theme_minimal() +
+  plot_themePub +
+  theme(axis.text.x = element_text(margin = margin(t = 5)),
+        legend.position = "none") +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    ))
+  
+boxplotAstaxPub
+```
+
+### ChlA
+```{r}
+boxplotChlAPub <- dfPig %>% 
+  mutate(Site = factor(Region, levels = c("North", "South")),
+    Color = factor(Color, levels = c("green", "red", "clean"))) %>% 
+  ggplot(aes(x = Site, y = ChlA, fill = Color, color = Color)) + 
+  geom_boxplot(alpha = 0.9, width = 0.8) + 
+  scale_fill_manual(values = colorPal) + 
+  scale_color_manual(values = colorPal) + 
+  labs(
+    x = NULL, 
+    y = expression("Chlorophyll a" ~ "(ng·cell"^{-1}*")"),
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt(breaks = c(0, 2.5, 10, 25, 50, 100, 150, 200),
+               labels = function(x) ifelse(x < 5, x, as.integer(x))) +
+  theme_minimal() +
+  plot_themePub +
+  theme(axis.text.x = element_text(margin = margin(t = 5)),
+        legend.position = "none") +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    ))
+  
+boxplotChlAPub
+```
+
+### ChlB
+```{r}
+boxplotChlBPub <- dfPig %>% 
+  mutate(Site = factor(Region, levels = c("North", "South")),
+    Color = factor(Color, levels = c("green", "red", "clean"))) %>% 
+  ggplot(aes(x = Site, y = ChlB, fill = Color, color = Color)) + 
+  geom_boxplot(alpha = 0.9, width = 0.8) + 
+  scale_fill_manual(values = colorPal) + 
+  scale_color_manual(values = colorPal) + 
+  labs(
+    x = NULL, 
+    y = expression("Chlorophyll b" ~ "(ng·cell"^{-1}*")"),
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt(breaks = c(0, 2.5, 10, 25, 50, 100, 150, 200),
+               labels = function(x) ifelse(x < 5, x, as.integer(x))) +
+  theme_minimal() +
+  plot_themePub +
+  theme(axis.text.x = element_text(margin = margin(t = 5)),
+        legend.position = "none") +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    ))
+  
+boxplotChlBPub
+```
+
+### Lutein
+```{r}
+boxplotLuteinPub <- dfPig %>% 
+  mutate(Site = factor(Region, levels = c("North", "South")),
+    Color = factor(Color, levels = c("green", "red", "clean"))) %>% 
+  ggplot(aes(x = Site, y = Lutein, fill = Color, color = Color)) + 
+  geom_boxplot(alpha = 0.9, width = 0.8) + 
+  scale_fill_manual(values = colorPal) + 
+  scale_color_manual(values = colorPal) + 
+  labs(
+    x = NULL, 
+    y = expression("Lutein" ~ "(ng·cell"^{-1}*")"),
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt(breaks = c(0, 2.5, 10, 25, 50, 100, 150, 200),
+               labels = function(x) ifelse(x < 5, x, as.integer(x))) +
+  theme_minimal() +
+  plot_themePub +
+  theme(axis.text.x = element_text(margin = margin(t = 5)),
+        legend.position = "none") +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    ))
+  
+boxplotLuteinPub
+```
+
+### BetaC
+```{r}
+boxplotBetaCPub <- dfPig %>% 
+  mutate(Site = factor(Region, levels = c("North", "South")),
+    Color = factor(Color, levels = c("green", "red", "clean"))) %>% 
+  ggplot(aes(x = Site, y = BetaC, fill = Color, color = Color)) + 
+  geom_boxplot(alpha = 0.9, width = 0.8) + 
+  scale_fill_manual(values = colorPal) + 
+  scale_color_manual(values = colorPal) + 
+  labs(
+    x = NULL, 
+    y = expression("β-carotene" ~ "(ng·cell"^{-1}*")"),
+    fill = NULL,
+    color = NULL) +
+ scale_y_sqrt(breaks = c(0, 2.5, 10, 25, 50, 100, 150, 200),
+               labels = function(x) ifelse(x < 5, x, as.integer(x))) +
+  theme_minimal() +
+  plot_themePub +
+  theme(axis.text.x = element_text(margin = margin(t = 5)),
+        legend.position = "none") +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    ))
+  
+boxplotBetaCPub
+```
+
+### Pheophytin
+```{r}
+boxplotPheophytinPub <- dfPig %>% 
+  mutate(Site = factor(Region, levels = c("North", "South")),
+    Color = factor(Color, levels = c("green", "red", "clean"))) %>% 
+  ggplot(aes(x = Site, y = Pheophytin, fill = Color, color = Color)) + 
+  geom_boxplot(alpha = 0.9, width = 0.8) + 
+  scale_fill_manual(values = colorPal) + 
+  scale_color_manual(values = colorPal) + 
+  labs(
+    x = NULL, 
+    y = expression("Pheophytin" ~ "(ng·cell"^{-1}*")"),
+    fill = NULL,
+    color = NULL) +
+scale_y_sqrt(breaks = c(0, 2.5, 10, 25, 50, 100, 150, 200),
+               labels = function(x) ifelse(x < 5, x, as.integer(x))) +
+  theme_minimal() +
+  plot_themePub +
+  theme(axis.text.x = element_text(margin = margin(t = 5)),
+        legend.position = "none") +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    ))
+  
+boxplotPheophytinPub
+```
+
+### Pheophorbide
+```{r}
+boxplotPheophorbidePub <- dfPig %>% 
+  mutate(Site = factor(Region, levels = c("North", "South")),
+    Color = factor(Color, levels = c("green", "red", "clean"))) %>% 
+  ggplot(aes(x = Site, y = Pheophorbide, fill = Color, color = Color)) + 
+  geom_boxplot(alpha = 0.9, width = 0.8) + 
+  scale_fill_manual(values = colorPal) + 
+  scale_color_manual(values = colorPal) + 
+  labs(
+    x = NULL, 
+    y = expression("Pheophorbide" ~ "(ng·cell"^{-1}*")"),
+    fill = NULL,
+    color = NULL) +
+scale_y_sqrt(breaks = c(0, 0.25, 1, 2.5, 5, 10, 25),
+               labels = function(x) ifelse(x < 5, x, as.integer(x))) +
+  theme_minimal() +
+  plot_themePub +
+  theme(axis.text.x = element_text(margin = margin(t = 5)),
+        legend.position = "none") +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    ))
+  
+boxplotPheophorbidePub
+```
+
+### Shared Legend
+```{r}
+legendPlot <- dfPig %>% 
+  mutate(Site = factor(Region, levels = c("North", "South")),
+    Color = factor(Color, levels = c("green", "red", "clean"))) %>% 
+  ggplot(aes(x = Site, y = Pheophorbide, fill = Color, color = Color)) + 
+  geom_boxplot(alpha = 0.9, width = 0.8) + 
+  scale_fill_manual(values = colorPal) + 
+  scale_color_manual(values = colorPal) + 
+  labs(
+    x = NULL, 
+    y = expression("Pheophorbide" ~ "(ng·cell"^{-1}*")"),
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt(breaks = c(0, 10, 50, 150, 300, 500, 1000, 1500),
+               labels = label_comma()) +
+  theme_minimal() +
+  plot_themePub +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    )) +
+  theme(
+    legend.position = "bottom",
+    legend.justification = "center",  # center the legend
+    legend.box.just = "center")
+
+legendPlot
+```
+
+### Combined Plot
+```{r}
+# Extract legend
+sharedLegend <- cowplot::get_legend(legendPlot)
+
+combinedPlot_AlgalProp <- cowplot::plot_grid(
+  boxplotChlAPub, boxplotAstaxPub, boxplotLuteinPub,
+  boxplotBetaCPub, boxplotPheophytinPub,
+  boxplotPheophorbidePub,
+  ncol = 3, nrow = 2, 
+  rel_heights = c(1,1), 
+  rel_widths = c(1,1),
+  align = "hv",
+  axis = "tblr",
+  labels = NULL
+)
+
+combinedPlot_AlgalProp
+
+
+ggsave(combinedPlot_AlgalProp, filename = "combinedPlot_AlgalProp.png", width = 7, height = 3.75, bg = "white")
+```
+
+### Cell Density formatting
+```{r}
+combinedPlot_CD <- cowplot::plot_grid(
+  boxplotCellDensityPub,
+  ncol = 3, nrow = 2, 
+  rel_heights = c(1,1), 
+  rel_widths = c(1,1),
+  align = "hv",
+  axis = "tblr",
+  labels = NULL
+)
+
+combinedPlot_CD
+
+
+ggsave(combinedPlot_CD, filename = "combinedPlot_CD.png", width = 7, height = 3.75, bg = "white")
+```
+
+## Algal Properties by Color {.tabset}
+
+### Cell Density
+```{r}
+boxplotCellDensityPub_Color <- dfPigCell %>% 
+  mutate(Color = factor(Color, levels = c("green", "red", "clean"))) %>% 
+  ggplot(aes(x = Color, y = CellDensity, fill = Color, color = Color)) + 
+  geom_boxplot(alpha = 0.9, width = 0.8) + 
+  scale_fill_manual(values = colorPal) + 
+  scale_color_manual(values = colorPal) + 
+  labs(
+    x = NULL, 
+    y = expression("Cell Density" ~ "(cells·mL"^{-1}*")"),
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt(breaks = c(0, 3e+04, 2e+05, 5e+05, 1e+06, 2e+06, 4e+06)) +
+  theme_minimal() +
+  plot_themePub +
+  theme(axis.text.x = element_text(margin = margin(t = 5)),
+        legend.position = "none") +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    ))
+  
+boxplotCellDensityPub_Color
+```
+
+### Cell Volume
+```{r}
+boxplotCellVolumePub_Color <- dfPigCell %>% 
+  filter(CellVolume > 0) %>% 
+  mutate(
+    Color = factor(Color, levels = c("green", "red", "clean"))) %>% 
+  ggplot(aes(x = Color, y = CellVolume, fill = Color, color = Color)) + 
+  geom_boxplot(alpha = 0.9, width = 0.8) + 
+  scale_fill_manual(values = colorPal) + 
+  scale_color_manual(values = colorPal) + 
+  labs(
+    x = NULL, 
+    y = expression("Cell Volume" ~ "(μm"^{3}*")"),
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt(breaks = c(0, 1000, 2500, 5000, 10000, 20000, 30000),
+               labels = label_comma()) +
+  theme_minimal() +
+  plot_themePub +
+  theme(axis.text.x = element_text(margin = margin(t = 5)),
+        legend.position = "none") +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    ))
+  
+boxplotCellVolumePub_Color
+```
+
+### Astaxanthin
+```{r}
+boxplotAstaxPub_Color <- dfPig %>% 
+  mutate(
+    Color = factor(Color, levels = c("green", "red", "clean"))) %>% 
+  ggplot(aes(x = Color, y = Astaxanthin, fill = Color, color = Color)) + 
+  geom_boxplot(alpha = 0.9, width = 0.8) + 
+  scale_fill_manual(values = colorPal) + 
+  scale_color_manual(values = colorPal) + 
+  labs(
+    x = NULL, 
+    y = expression("Astaxanthin" ~ "(ng·cell"^{-1}*")"),
+    fill = NULL,
+    color = NULL) +
+   scale_y_sqrt(breaks = c(0, 0.5, 2.5, 5, 10, 20, 30, 40, 50),
+               labels = function(x) ifelse(x < 5, x, as.integer(x))) +
+  theme_minimal() +
+  plot_themePub +
+  theme(axis.text.x = element_text(margin = margin(t = 5)),
+        legend.position = "none") +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    ))
+  
+boxplotAstaxPub_Color
+```
+
+### ChlA
+```{r}
+boxplotChlAPub_Color <- dfPig %>% 
+  mutate(
+    Color = factor(Color, levels = c("green", "red", "clean"))) %>% 
+  ggplot(aes(x = Color, y = ChlA, fill = Color, color = Color)) + 
+  geom_boxplot(alpha = 0.9, width = 0.8) + 
+  scale_fill_manual(values = colorPal) + 
+  scale_color_manual(values = colorPal) + 
+  labs(
+    x = NULL, 
+    y = expression("Chlorophyll a" ~ "(ng·cell"^{-1}*")"),
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt(breaks = c(0, 2.5, 10, 25, 50, 100, 150, 200),
+               labels = function(x) ifelse(x < 5, x, as.integer(x))) +
+  theme_minimal() +
+  plot_themePub +
+  theme(axis.text.x = element_text(margin = margin(t = 5)),
+        legend.position = "none") +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    ))
+  
+boxplotChlAPub_Color
+```
+
+### ChlB
+```{r}
+boxplotChlBPub_Color <- dfPig %>% 
+  mutate(
+    Color = factor(Color, levels = c("green", "red", "clean"))) %>% 
+  ggplot(aes(x = Color, y = ChlB, fill = Color, color = Color)) + 
+  geom_boxplot(alpha = 0.9, width = 0.8) + 
+  scale_fill_manual(values = colorPal) + 
+  scale_color_manual(values = colorPal) + 
+  labs(
+    x = NULL, 
+    y = expression("Chlorophyll b" ~ "(ng·cell"^{-1}*")"),
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt(breaks = c(0, 2.5, 10, 25, 50, 100, 150, 200),
+               labels = function(x) ifelse(x < 5, x, as.integer(x))) +
+  theme_minimal() +
+  plot_themePub +
+  theme(axis.text.x = element_text(margin = margin(t = 5)),
+        legend.position = "none") +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    ))
+  
+boxplotChlBPub_Color
+```
+
+### Lutein
+```{r}
+boxplotLuteinPub_Color <- dfPig %>% 
+  mutate(
+    Color = factor(Color, levels = c("green", "red", "clean"))) %>% 
+  ggplot(aes(x = Color, y = Lutein, fill = Color, color = Color)) + 
+  geom_boxplot(alpha = 0.9, width = 0.8) + 
+  scale_fill_manual(values = colorPal) + 
+  scale_color_manual(values = colorPal) + 
+  labs(
+    x = NULL, 
+    y = expression("Lutein" ~ "(ng·cell"^{-1}*")"),
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt(breaks = c(0, 2.5, 10, 25, 50, 100, 150, 200),
+               labels = function(x) ifelse(x < 5, x, as.integer(x))) +
+  theme_minimal() +
+  plot_themePub +
+  theme(axis.text.x = element_text(margin = margin(t = 5)),
+        legend.position = "none") +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    ))
+  
+boxplotLuteinPub_Color
+```
+
+### BetaC
+```{r}
+boxplotBetaCPub_Color <- dfPig %>% 
+  mutate(
+    Color = factor(Color, levels = c("green", "red", "clean"))) %>% 
+  ggplot(aes(x = Color, y = BetaC, fill = Color, color = Color)) + 
+  geom_boxplot(alpha = 0.9, width = 0.8) + 
+  scale_fill_manual(values = colorPal) + 
+  scale_color_manual(values = colorPal) + 
+  labs(
+    x = NULL, 
+    y = expression("β-carotene" ~ "(ng·cell"^{-1}*")"),
+    fill = NULL,
+    color = NULL) +
+ scale_y_sqrt(breaks = c(0, 2.5, 10, 25, 50, 100, 150, 200),
+               labels = function(x) ifelse(x < 5, x, as.integer(x))) +
+  theme_minimal() +
+  plot_themePub +
+  theme(axis.text.x = element_text(margin = margin(t = 5)),
+        legend.position = "none") +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    ))
+  
+boxplotBetaCPub_Color
+```
+
+### Pheophytin
+```{r}
+boxplotPheophytinPub_Color <- dfPig %>% 
+  mutate(
+    Color = factor(Color, levels = c("green", "red", "clean"))) %>% 
+  ggplot(aes(x = Color, y = Pheophytin, fill = Color, color = Color)) + 
+  geom_boxplot(alpha = 0.9, width = 0.8) + 
+  scale_fill_manual(values = colorPal) + 
+  scale_color_manual(values = colorPal) + 
+  labs(
+    x = NULL, 
+    y = expression("Pheophytin" ~ "(ng·cell"^{-1}*")"),
+    fill = NULL,
+    color = NULL) +
+scale_y_sqrt(breaks = c(0, 2.5, 10, 25, 50, 100, 150, 200),
+               labels = function(x) ifelse(x < 5, x, as.integer(x))) +
+  theme_minimal() +
+  plot_themePub +
+  theme(axis.text.x = element_text(margin = margin(t = 5)),
+        legend.position = "none") +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    ))
+  
+boxplotPheophytinPub_Color
+```
+
+### Pheophorbide
+```{r}
+boxplotPheophorbidePub_Color <- dfPig %>% 
+  mutate(
+    Color = factor(Color, levels = c("green", "red", "clean"))) %>% 
+  ggplot(aes(x = Color, y = Pheophorbide, fill = Color, color = Color)) + 
+  geom_boxplot(alpha = 0.9, width = 0.8) + 
+  scale_fill_manual(values = colorPal) + 
+  scale_color_manual(values = colorPal) + 
+  labs(
+    x = NULL, 
+    y = expression("Pheophorbide" ~ "(ng·cell"^{-1}*")"),
+    fill = NULL,
+    color = NULL) +
+scale_y_sqrt(breaks = c(0, 0.25, 1, 2.5, 5, 10, 25),
+               labels = function(x) ifelse(x < 5, x, as.integer(x))) +
+  
+  theme_minimal() +
+  plot_themePub +
+  theme(axis.text.x = element_text(margin = margin(t = 5)),
+        legend.position = "none") +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    ))
+  
+boxplotPheophorbidePub_Color
+```
+
+### Combined Plot
+```{r}
+# Extract legend
+sharedLegend <- cowplot::get_legend(legendPlot)
+
+combinedPlot_AlgalProp_Color <- cowplot::plot_grid(
+  boxplotChlAPub_Color, boxplotAstaxPub_Color, boxplotLuteinPub_Color,
+  boxplotBetaCPub_Color, boxplotPheophytinPub_Color,
+  boxplotPheophorbidePub_Color,
+  ncol = 3, nrow = 2, 
+  rel_heights = c(1,1), 
+  rel_widths = c(1,1),
+  align = "hv",
+  axis = "tblr",
+  labels = NULL
+)
+
+combinedPlot_AlgalProp_Color
+
+
+ggsave(combinedPlot_AlgalProp_Color, filename = "combinedPlot_AlgalProp_Color.png", width = 7, height = 3.75, bg = "white")
+```
+
+### Cell Density formatting
+```{r}
+combinedPlot_CD_Color <- cowplot::plot_grid(
+  boxplotCellDensityPub_Color,
+  ncol = 3, nrow = 2, 
+  rel_heights = c(1,1), 
+  rel_widths = c(1,1),
+  align = "hv",
+  axis = "tblr",
+  labels = NULL
+)
+
+combinedPlot_CD_Color
+
+
+ggsave(combinedPlot_CD_Color, filename = "combinedPlot_CD_Color.png", width = 7, height = 3.75, bg = "white")
+```
+

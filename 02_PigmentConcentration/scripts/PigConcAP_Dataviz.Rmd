@@ -1,0 +1,3477 @@
+---
+title: "Data Vizualization - Pigment Concentration (Antarctic Peninsula)"
+author: "Ellie Ryan"
+date: "`r Sys.Date()`"
+output:
+   html_document:
+    theme: flatly
+    highlight: zenburn
+    toc: true
+    toc_float: true
+    toc_collapsed: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Created:** 8/13/2025
+
+**Last Modified:** 8/20/2025
+
+```{r, message=FALSE, warning=FALSE}
+# Load packages
+library(tidyverse)
+library(lubridate)
+library(stringr)
+library(kableExtra)
+library(scales)
+library(GGally)
+library(patchwork)
+library(Hmisc)
+library(reshape2)
+library(car)
+library(FSA)
+library(vegan)
+```
+
+```{r}
+
+APPal <- c(
+  "North" = "#364C56", 
+  "South" = "#ABBF26"
+)
+locationPal <- c(
+  "Lemon Creek Glacier" = "#e0b10d",
+  "Camp Kiser" = "#4c7575",
+  "Antarctic Peninsula" = "#a34108"
+) 
+
+locAbbrevPal <- c(
+  "LC" = "#e0b10d",
+  "CK" = "#4c7575",
+  "AP" = "#a34108"
+)
+
+locationPal_APcolor <- c(
+  "Lemon Creek Glacier" = "#e0b10d",
+  "Camp Kiser" = "#4c7575",
+  "AP - red" = "#933410", 
+  "AP - green" = "#326e35", 
+  "AP - clean" = "#1d1f42"
+)
+
+colorPal <- c(
+  "clean" = "#769a9c",
+  "red" = "#933410",
+  "green" = "#326e35"
+)
+
+algaePal <- c(
+  "clean" = "#a5bdc0",
+  "algae" = "#735a69"
+)
+
+pigPal <- c(
+  "Astaxanthin" = "#b43f1f",
+  "Lutein" = "#f2bc1a",
+  "ChlB" = "#439468",
+  "ChlA" = "#37a133",
+  "BetaC" = "#bf7915",
+  "Pheophorbide" = "#534f8d", 
+  "Pheophytin" = "#95879f"
+)
+
+plot_theme <- theme(
+  axis.title = element_text(size = 12, face = "bold"), # Axis labels: 12 pt, bold
+  axis.text = element_text(size = 12), # Axis text: 12 pt
+  axis.line = element_line(linewidth = 0.5),  # Thicker axis line
+  legend.position = "top", # Position legend at the top
+  legend.justification = c(0, 1), # Justify legend to top-left
+  legend.text = element_text(size = 12), # Legend text: 12 pt
+  legend.title = element_text(size = 12), 
+  plot.title = element_text(size = 14, face = "bold"),  # Adjust plot title size
+  plot.subtitle = element_text(size = 13, face = "italic"), 
+  plot.margin = margin(20, 20, 20, 20)
+)
+
+plot_theme2 <- theme(
+  axis.title = element_text(size = 12, face = "bold"), # Axis labels: 12 pt, bold
+  axis.text = element_text(size = 12), # Axis text: 12 pt
+  axis.line = element_line(linewidth = 0.5),  # Thicker axis line
+  legend.position = "top", # Position legend at the top
+  legend.justification = c(0, 1), # Justify legend to top-left
+  legend.text = element_text(size = 12), # Legend text: 12 pt
+  legend.title = element_text(size = 12), 
+  plot.title = element_text(size = 14, face = "bold"),  # Adjust plot title size
+  plot.subtitle = element_text(size = 13, face = "italic"), 
+  axis.text.x = element_text(angle = 45, hjust = 1), 
+  plot.margin = margin(20, 20, 20, 20)
+)
+
+pairsplot_theme <- theme(
+  text = element_text(size = 10),  # Adjust variable name text size
+  axis.text = element_text(size = 8),  # Adjust axis text size
+  plot.title = element_text(size = 12, face = "bold"),  # Adjust plot title size
+  legend.text = element_text(size = 12))  # Adjust legend text size
+```
+
+# Overview
+
+The purpose of this `.Rmd` is to visualize pigment concentration (ppb) by AP region and color, compare pigment concentration between sampling visits for site with repeat visits, and obtain basic summary statistics associated with each pigment. Before proceeding, I will clean the dataset so that it features only the variables I am interested in for this analysis. In this dataset, 241 snow samples have been collected between three locations: Lemon Creek Glacier, Camp Kiser, and the Antarctic Peninsula. These observations are broken down by `Color`, or the apparent snow color at time of sample collection. To keep things simple, there are only three levels to the `Color` category: red, green and clean. The breakdown of samples collected at each site is as follows:
+
+  -   Antarctic Peninsula:
+    -   113 samples
+        -   45 red
+        -   49 green
+        -   19 clean
+        
+In this analysis, samples will also be divided by region in the Antarctic Peninsula. The breakdown is as follows: 
+
+  -   North:
+        -   Pendulum Cove, Deception Island
+        -   Orne Harbour
+        -   Danco Island
+        -   Neko Harbour
+        -   Damoy Point
+        -   Pléneau Island
+        -   Petermann Island
+        
+  -   South:
+        -   Stonington Island
+        -   Horseshoe Island
+
+        
+*NOTE: Fewer samples were used for analysis, since there are NA values for pigment concentrations of some samples.*
+        
+From pigment outlier analysis, the following outliers were identified for removal:
+
+-   2025-02-19-SI-algae3
+-   2025-02-24-DA-algae2
+-   2025-02-24-DA-algae6
+-   2025-03-07-NH-algae3
+-   2025-02-24-DA-algae1
+-   2025-01-12-PI-algae10
+
+
+See the Preliminary Results and Figures doc for justification for removal of each. 
+
+## Data Wrangling
+
+```{r}
+df <- read.csv("CompiledDataPI.csv")
+
+df <- df %>% 
+  filter(Location == "Antarctic Peninsula")
+```
+
+Adding an `Algae` column to classify samples as algae or clean snow samples and a `LocColor` column to classify AP algae samples as red or green, and an `APLoc` column to separate samples by region. 
+
+```{r}
+df <- df %>% 
+  mutate(Site = dplyr::recode(Site, "Pendulum Cove, Deception Island" = "Pendulum Cove"))
+
+# Format date column 
+df <- df %>%
+  mutate(
+    Date = as.Date(Date, format = "%m/%d/%Y"))
+
+# Add LocColor
+df <- df %>% mutate(LocColor = case_when(
+    Location == "Antarctic Peninsula" ~ paste("AP -", Color),
+    TRUE ~ Location
+  )) %>% 
+  relocate(LocColor, .after = Site) %>% 
+  mutate(Algae = case_when(
+    Color %in% c("red", "green") ~ "algae",
+    Color == "clean" ~ 'clean'
+  )) %>% 
+  relocate(Algae, .after = Color)
+
+# Add LocAbbrev
+df <- df %>% mutate(LocAbbrev = case_when(
+  Location == "Antarctic Peninsula" ~ paste("AP"),
+  Location == "Lemon Creek Glacier" ~ paste("LC"),
+  Location == "Camp Kiser" ~ paste("CK")
+)) %>%  
+  relocate(LocAbbrev, .after = LocColor)
+
+# Add APLoc
+df <- df %>% mutate(APLoc = case_when(
+  Site %in% c("Pendulum Cove",
+              "Orne Harbour",
+              "Danco Island",
+              "Neko Harbour",
+              "Damoy Point",
+              "Pléneau Island",
+              "Petermann Island") ~ paste("North"),
+  Site %in% c("Stonington Island",
+              "Horseshoe Island")~ paste("South")
+)) %>% 
+  relocate(APLoc, .after = Site)
+```
+
+```{r}
+str(df)
+```
+
+```{r}
+outliers <- c(
+  "2025-02-19-SI-algae3",
+  "2025-02-24-DA-algae2",
+  "2025-02-24-DA-algae6",
+  "2025-03-07-NH-algae3",
+  "2023-08-24-LC-algae33",
+  "2025-01-12-PI-algae10")
+
+df <- df %>% 
+  filter(!SampleID %in% outliers)
+```
+
+### Pigments
+```{r}
+dfPig <- df %>% 
+  select(c("SampleID", "Date", "Location", "Latitude", "Site", "APLoc", "LocColor", "LocAbbrev", "Color", "Algae", Astaxanthin:Pheophytin)) %>% 
+  na.omit(dfPig)
+```
+
+### Pigments & Anions 
+```{r}
+dfAnion <- df %>% 
+  select(c("SampleID", "Date", "Location", "Latitude", "Site", "APLoc", "LocColor", "LocAbbrev", "Color", "Algae", Astaxanthin:Pheophytin, Fo:SO42)) %>% 
+  mutate(Algae = case_when(
+    Color %in% c("red", "green") ~ "algae",
+    Color == "clean" ~ 'clean'
+  )) %>% 
+  mutate(NO2NO3 = NO2 + NO3) %>% 
+  relocate(Algae, .after = Color) %>% 
+  relocate(NO2NO3, .after = Cl) %>% 
+  select(!NO2) %>% 
+  select(!NO3) %>% 
+  na.omit(dfAnion)
+
+outliersAnion <- c("2025-02-24-DA-algae1")
+
+dfAnion <- dfAnion %>% 
+  filter(!SampleID %in% outliersAnion)
+
+```
+
+### Pigments (Pivoted)
+```{r}
+dfPig_long <- dfPig %>% 
+  pivot_longer(cols = Astaxanthin:Pheophytin,
+               names_to = "Pigment",
+               values_to = "Concentration")
+```
+
+### Anions (Pivoted)
+```{r}
+dfAnion_long <- dfAnion %>% 
+  pivot_longer(cols = c(Fo, Cl, SO42, PO43, NO2NO3),
+               names_to = "Anion",
+               values_to = "Concentration")
+```
+
+
+# Summary Tables {.tabset}
+
+## Primary Pigments
+```{r}
+# Pigment Summary (ChlA and ChlB)
+ChlSummary <- dfPig %>% 
+  group_by(APLoc, Color) %>% 
+  summarise(
+    n = n(),
+    ChlA_mean = comma(round(mean(ChlA, na.rm = TRUE), 2)),
+    ChlA_median = comma(round(median(ChlA, na.rm = TRUE), 2)),
+    ChlA_max = comma(round(max(ChlA, na.rm = TRUE), 2)),
+    ChlA_min = comma(round(min(ChlA, na.rm = TRUE), 2)),
+    ChlA_sd = comma(round(sd(ChlA, na.rm = TRUE), 2)),
+    ChlB_mean = comma(round(mean(ChlB, na.rm = TRUE), 2)),
+    ChlB_median = comma(round(median(ChlB, na.rm = TRUE), 2)),
+    ChlB_max = comma(round(max(ChlB, na.rm = TRUE), 2)),
+    ChlB_min = comma(round(min(ChlB, na.rm = TRUE), 2)),
+    ChlB_sd = comma(round(sd(ChlB, na.rm = TRUE), 2)),
+    .groups = "drop"
+  )
+
+# Add "all" for each site
+ChlSummaryAll <- dfPig %>% 
+  group_by(APLoc) %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    ChlA_mean = comma(round(mean(ChlA, na.rm = TRUE), 2)),
+    ChlA_median = comma(round(median(ChlA, na.rm = TRUE), 2)),
+    ChlA_max = comma(round(max(ChlA, na.rm = TRUE), 2)),
+    ChlA_min = comma(round(min(ChlA, na.rm = TRUE), 2)),
+    ChlA_sd = comma(round(sd(ChlA, na.rm = TRUE), 2)),
+    ChlB_mean = comma(round(mean(ChlB, na.rm = TRUE), 2)),
+    ChlB_median = comma(round(median(ChlB, na.rm = TRUE), 2)),
+    ChlB_max = comma(round(max(ChlB, na.rm = TRUE), 2)),
+    ChlB_min = comma(round(min(ChlB, na.rm = TRUE), 2)),
+    ChlB_sd = comma(round(sd(ChlB, na.rm = TRUE), 2)),
+    .groups = "drop"
+  )
+
+# Combine and order rows
+ChlSummary <- bind_rows(ChlSummaryAll, ChlSummary) %>% 
+  arrange(APLoc, match(Color, c("green", "red", "clean", "all")))
+
+# Format table with kableExtra
+ChlSummary %>% 
+  kable("html", caption = "Summary Statistics for ChlA and ChlB by Snow Color and AP Region (ppb)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+## Carotenoids
+```{r}
+# Pigment Summary (Astaxanthin, Beta Carotene and Lutein)
+CarotenoidSummary <- dfPig %>% 
+  group_by(APLoc, Color) %>% 
+  summarise(
+    n = n(),
+    Astaxanthin_mean = comma(round(mean(Astaxanthin, na.rm = TRUE), 2)),
+    Astaxanthin_median = comma(round(median(Astaxanthin, na.rm = TRUE), 2)),
+    Astaxanthin_max = comma(round(max(Astaxanthin, na.rm = TRUE), 2)),
+    Astaxanthin_min = comma(round(min(Astaxanthin, na.rm = TRUE), 2)),
+    Astaxanthin_sd = comma(round(sd(Astaxanthin, na.rm = TRUE), 2)),
+    Lutein_mean = comma(round(mean(Lutein, na.rm = TRUE), 2)),
+    Lutein_median = comma(round(median(Lutein, na.rm = TRUE), 2)),
+    Lutein_max = comma(round(max(Lutein, na.rm = TRUE), 2)),
+    Lutein_min = comma(round(min(Lutein, na.rm = TRUE), 2)),
+    Lutein_sd = comma(round(sd(Lutein, na.rm = TRUE), 2)),
+    BetaC_mean = comma(round(mean(BetaC, na.rm = TRUE), 2)),
+    BetaC_median = comma(round(median(BetaC, na.rm = TRUE), 2)),
+    BetaC_max = comma(round(max(BetaC, na.rm = TRUE), 2)),
+    BetaC_min = comma(round(min(BetaC, na.rm = TRUE), 2)),
+    BetaC_sd = comma(round(sd(BetaC, na.rm = TRUE), 2)),
+    .groups = "drop"
+  )
+
+# Add "all" for each site
+CarotenoidSummaryAll <- dfPig %>% 
+  group_by(APLoc) %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    Astaxanthin_mean = comma(round(mean(Astaxanthin, na.rm = TRUE), 2)),
+    Astaxanthin_median = comma(round(median(Astaxanthin, na.rm = TRUE), 2)),
+    Astaxanthin_max = comma(round(max(Astaxanthin, na.rm = TRUE), 2)),
+    Astaxanthin_min = comma(round(min(Astaxanthin, na.rm = TRUE), 2)),
+    Astaxanthin_sd = comma(round(sd(Astaxanthin, na.rm = TRUE), 2)),
+    Lutein_mean = comma(round(mean(Lutein, na.rm = TRUE), 2)),
+    Lutein_median = comma(round(median(Lutein, na.rm = TRUE), 2)),
+    Lutein_max = comma(round(max(Lutein, na.rm = TRUE), 2)),
+    Lutein_min = comma(round(min(Lutein, na.rm = TRUE), 2)),
+    Lutein_sd = comma(round(sd(Lutein, na.rm = TRUE), 2)),
+    BetaC_mean = comma(round(mean(BetaC, na.rm = TRUE), 2)),
+    BetaC_median = comma(round(median(BetaC, na.rm = TRUE), 2)),
+    BetaC_max = comma(round(max(BetaC, na.rm = TRUE), 2)),
+    BetaC_min = comma(round(min(BetaC, na.rm = TRUE), 2)),
+    BetaC_sd = comma(round(sd(BetaC, na.rm = TRUE), 2)),
+    .groups = "drop"
+  )
+
+
+# Combine and order rows
+CarotenoidSummary <- bind_rows(CarotenoidSummaryAll, CarotenoidSummary) %>% 
+  arrange(APLoc, match(Color, c("green", "red", "clean", "all")))
+
+# Format table with kableExtra
+CarotenoidSummary %>% 
+  kable("html", caption = "Summary Statistics for Astaxanthin and Lutein by Snow Color and AP Region (ppb)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+
+## Degradation Products 
+```{r}
+# Pigment Summary (Pheophytin and Pheophorbide)
+DegSummary <- dfPig %>% 
+  group_by(APLoc, Color) %>% 
+  summarise(
+    n = n(),
+    Pheophytin_mean = comma(round(mean(Pheophytin, na.rm = TRUE), 2)),
+    Pheophytin_median = comma(round(median(Pheophytin, na.rm = TRUE), 2)),
+    Pheophytin_max = comma(round(max(Pheophytin, na.rm = TRUE), 2)),
+    Pheophytin_min = comma(round(min(Pheophytin, na.rm = TRUE), 2)),
+    Pheophytin_sd = comma(round(sd(Pheophytin, na.rm = TRUE), 2)),
+    Pheophorbide_mean = comma(round(mean(Pheophorbide, na.rm = TRUE), 2)),
+    Pheophorbide_median = comma(round(median(Pheophorbide, na.rm = TRUE), 2)),
+    Pheophorbide_max = comma(round(max(Pheophorbide, na.rm = TRUE), 2)),
+    Pheophorbide_min = comma(round(min(Pheophorbide, na.rm = TRUE), 2)),
+    Pheophorbide_sd = comma(round(sd(Pheophorbide, na.rm = TRUE), 2)),
+    .groups = "drop"
+  )
+
+# Add "all" for each site
+DegSummaryAll <- dfPig %>% 
+  group_by(APLoc) %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    Pheophytin_mean = comma(round(mean(Pheophytin, na.rm = TRUE), 2)),
+    Pheophytin_median = comma(round(median(Pheophytin, na.rm = TRUE), 2)),
+    Pheophytin_max = comma(round(max(Pheophytin, na.rm = TRUE), 2)),
+    Pheophytin_min = comma(round(min(Pheophytin, na.rm = TRUE), 2)),
+    Pheophytin_sd = comma(round(sd(Pheophytin, na.rm = TRUE), 2)),
+    Pheophorbide_mean = comma(round(mean(Pheophorbide, na.rm = TRUE), 2)),
+    Pheophorbide_median = comma(round(median(Pheophorbide, na.rm = TRUE), 2)),
+    Pheophorbide_max = comma(round(max(Pheophorbide, na.rm = TRUE), 2)),
+    Pheophorbide_min = comma(round(min(Pheophorbide, na.rm = TRUE), 2)),
+    Pheophorbide_sd = comma(round(sd(Pheophorbide, na.rm = TRUE), 2)),
+    .groups = "drop"
+  )
+
+# Combine and order rows
+DegSummary <- bind_rows(DegSummaryAll, DegSummary) %>% 
+  arrange(APLoc, match(Color, c("green", "red", "clean", "all")))
+
+# Format table with kableExtra
+DegSummary %>% 
+  kable("html", caption = "Summary Statistics for Pheophytin and Pheophorbide by Snow Color and AP Region (ppb)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+## Repeat Visits {.tabset}
+
+### Petermann Island
+```{r}
+PISummary <- dfPig %>% 
+  filter(Site == "Petermann Island") %>% 
+  group_by(Date, Color) %>% 
+  summarise(
+    n = n(),
+    ChlA_median = comma(round(median(ChlA, na.rm = TRUE), 2)),
+    ChlB_median = comma(round(median(ChlB, na.rm = TRUE), 2)),
+    Astax_median = comma(round(median(Astaxanthin, na.rm = TRUE), 2)),
+    Lutein_median = comma(round(median(Lutein, na.rm = TRUE), 2)),
+    BetaC_median = comma(round(median(BetaC, na.rm = TRUE), 2)),
+    Pheophytin_median = comma(round(median(Pheophytin, na.rm = TRUE), 2)),
+    Pheophorbide_median = comma(round(median(Pheophorbide, na.rm = TRUE), 2)),
+    .groups = "drop"
+  )
+
+PISummaryAll <- dfPig %>% 
+  filter(Site == "Petermann Island") %>% 
+  group_by(Date) %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    ChlA_median = comma(round(median(ChlA, na.rm = TRUE), 2)),
+    ChlB_median = comma(round(median(ChlB, na.rm = TRUE), 2)),
+    Astax_median = comma(round(median(Astaxanthin, na.rm = TRUE), 2)),
+    Lutein_median = comma(round(median(Lutein, na.rm = TRUE), 2)),
+    BetaC_median = comma(round(median(BetaC, na.rm = TRUE), 2)),
+    Pheophytin_median = comma(round(median(Pheophytin, na.rm = TRUE), 2)),
+    Pheophorbide_median = comma(round(median(Pheophorbide, na.rm = TRUE), 2)),
+    .groups = "drop"
+  )
+
+# Combine and order rows
+PISummary <- bind_rows(PISummaryAll, PISummary) %>% 
+  arrange(Date, match(Color, c("green", "red", "clean", "all")))
+
+# Format table with kableExtra
+PISummary %>% 
+  kable("html", caption = "Summary Statistics for Petermann Island by Snow Color and Sampling Date (ppm)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+### Damoy Point
+```{r}
+PISummary <- dfPig %>% 
+  filter(Site == "Damoy Point") %>% 
+  group_by(Date, Color) %>% 
+  summarise(
+    n = n(),
+    ChlA_median = comma(round(median(ChlA, na.rm = TRUE), 2)),
+    ChlB_median = comma(round(median(ChlB, na.rm = TRUE), 2)),
+    Astax_median = comma(round(median(Astaxanthin, na.rm = TRUE), 2)),
+    Lutein_median = comma(round(median(Lutein, na.rm = TRUE), 2)),
+    BetaC_median = comma(round(median(BetaC, na.rm = TRUE), 2)),
+    Pheophytin_median = comma(round(median(Pheophytin, na.rm = TRUE), 2)),
+    Pheophorbide_median = comma(round(median(Pheophorbide, na.rm = TRUE), 2)),
+    .groups = "drop"
+  )
+
+PISummaryAll <- dfPig %>% 
+  filter(Site == "Damoy Point") %>% 
+  group_by(Date) %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    ChlA_median = comma(round(median(ChlA, na.rm = TRUE), 2)),
+    ChlB_median = comma(round(median(ChlB, na.rm = TRUE), 2)),
+    Astax_median = comma(round(median(Astaxanthin, na.rm = TRUE), 2)),
+    Lutein_median = comma(round(median(Lutein, na.rm = TRUE), 2)),
+    BetaC_median = comma(round(median(BetaC, na.rm = TRUE), 2)),
+    Pheophytin_median = comma(round(median(Pheophytin, na.rm = TRUE), 2)),
+    Pheophorbide_median = comma(round(median(Pheophorbide, na.rm = TRUE), 2)),
+    .groups = "drop"
+  )
+
+# Combine and order rows
+PISummary <- bind_rows(PISummaryAll, PISummary) %>% 
+  arrange(Date, match(Color, c("green", "red", "clean", "all")))
+
+# Format table with kableExtra
+PISummary %>% 
+  kable("html", caption = "Summary Statistics for Damoy Point by Snow Color and Sampling Date (ppm)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+### Orne Harbour
+```{r}
+PISummary <- dfPig %>% 
+  filter(Site == "Orne Harbour") %>% 
+  group_by(Date, Color) %>% 
+  summarise(
+    n = n(),
+    ChlA_median = comma(round(median(ChlA, na.rm = TRUE), 2)),
+    ChlB_median = comma(round(median(ChlB, na.rm = TRUE), 2)),
+    Astax_median = comma(round(median(Astaxanthin, na.rm = TRUE), 2)),
+    Lutein_median = comma(round(median(Lutein, na.rm = TRUE), 2)),
+    BetaC_median = comma(round(median(BetaC, na.rm = TRUE), 2)),
+    Pheophytin_median = comma(round(median(Pheophytin, na.rm = TRUE), 2)),
+    Pheophorbide_median = comma(round(median(Pheophorbide, na.rm = TRUE), 2)),
+    .groups = "drop"
+  )
+
+PISummaryAll <- dfPig %>% 
+  filter(Site == "Orne Harbour") %>% 
+  group_by(Date) %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    ChlA_median = comma(round(median(ChlA, na.rm = TRUE), 2)),
+    ChlB_median = comma(round(median(ChlB, na.rm = TRUE), 2)),
+    Astax_median = comma(round(median(Astaxanthin, na.rm = TRUE), 2)),
+    Lutein_median = comma(round(median(Lutein, na.rm = TRUE), 2)),
+    BetaC_median = comma(round(median(BetaC, na.rm = TRUE), 2)),
+    Pheophytin_median = comma(round(median(Pheophytin, na.rm = TRUE), 2)),
+    Pheophorbide_median = comma(round(median(Pheophorbide, na.rm = TRUE), 2)),
+    .groups = "drop"
+  )
+
+# Combine and order rows
+PISummary <- bind_rows(PISummaryAll, PISummary) %>% 
+  arrange(Date, match(Color, c("green", "red", "clean", "all")))
+
+# Format table with kableExtra
+PISummary %>% 
+  kable("html", caption = "Summary Statistics for Orne Harbour by Snow Color and Sampling Date (ppm)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+### Pléneau Island
+```{r}
+PISummary <- dfPig %>% 
+  filter(Site == "Pléneau Island") %>% 
+  group_by(Date, Color) %>% 
+  summarise(
+    n = n(),
+    ChlA_median = comma(round(median(ChlA, na.rm = TRUE), 2)),
+    ChlB_median = comma(round(median(ChlB, na.rm = TRUE), 2)),
+    Astax_median = comma(round(median(Astaxanthin, na.rm = TRUE), 2)),
+    Lutein_median = comma(round(median(Lutein, na.rm = TRUE), 2)),
+    BetaC_median = comma(round(median(BetaC, na.rm = TRUE), 2)),
+    Pheophytin_median = comma(round(median(Pheophytin, na.rm = TRUE), 2)),
+    Pheophorbide_median = comma(round(median(Pheophorbide, na.rm = TRUE), 2)),
+    .groups = "drop"
+  )
+
+PISummaryAll <- dfPig %>% 
+  filter(Site == "Pléneau Island") %>% 
+  group_by(Date) %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    ChlA_median = comma(round(median(ChlA, na.rm = TRUE), 2)),
+    ChlB_median = comma(round(median(ChlB, na.rm = TRUE), 2)),
+    Astax_median = comma(round(median(Astaxanthin, na.rm = TRUE), 2)),
+    Lutein_median = comma(round(median(Lutein, na.rm = TRUE), 2)),
+    BetaC_median = comma(round(median(BetaC, na.rm = TRUE), 2)),
+    Pheophytin_median = comma(round(median(Pheophytin, na.rm = TRUE), 2)),
+    Pheophorbide_median = comma(round(median(Pheophorbide, na.rm = TRUE), 2)),
+    .groups = "drop"
+  )
+
+# Combine and order rows
+PISummary <- bind_rows(PISummaryAll, PISummary) %>% 
+  arrange(Date, match(Color, c("green", "red", "clean", "all")))
+
+# Format table with kableExtra
+PISummary %>% 
+  kable("html", caption = "Summary Statistics for Pléneau Island by Snow Color and Sampling Date (ppm)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+# ANOVA/Kruskal Wallis Test
+Before proceeding with an ANOVA test to assess differences in pigment concentration between locations, I am going to check to see if these variables follow the assumptions of normality and equal variance required to run an ANOVA: 
+```{r}
+# Step 1: Group by pigment and nest data
+nested <- dfPig_long %>%
+  group_by(Pigment) %>%
+  nest()
+
+# Step 2: Fit ANOVA model, extract residuals, and run tests
+anovaAssumptionsResults <- nested %>%
+  mutate(
+    # Fit ANOVA model
+    aov_model = map(data, ~ aov(Concentration ~ APLoc, data = .x)),
+    
+    # Shapiro-Wilk test for normality of residuals
+    shapiro_p = map_dbl(aov_model, ~ shapiro.test(residuals(.x))$p.value),
+    
+    # Levene's Test for homogeneity of variance
+    levene_p = map_dbl(data, ~leveneTest(Concentration ~ factor(APLoc), data = .x)$`Pr(>F)`[1])
+  )
+```
+
+From the below results, it appears that none of the pigments are both normally distributed and have equal variances. Because of this, I am going to proceed with a Kruskal-Wallis test in lieu of an ANOVA. 
+
+```{r}
+anovaAssumptionsResults %>%
+  select(Pigment, shapiro_p, levene_p) %>%
+  mutate(
+    normality_ok = shapiro_p > 0.05,
+    homogeneity_ok = levene_p > 0.05
+  )
+```
+
+## Kruskal-Wallis Test {.tabset}
+Below, I use the Kruskal-Wallis test to run a non-parametric comparison of each pigment across each location. Then, I follow up with a Dunn's post hoc test for the pigments that show significant differences between the locations. I also look at differences in pigment concentration between different snow colors within each site. 
+
+### All Sites (Algae Samples)
+```{r}
+kruskalResults <- dfPig_long %>%
+  group_by(Pigment) %>%
+  filter(Algae == "algae") %>% 
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ APLoc, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value)
+  )
+
+
+# Step 2: Run Dunn's test
+kruskalResults <- kruskalResults %>%
+  mutate(
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(APLoc), data = .x, method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+#### Visualize Results
+```{r}
+dunn_pairs <- kruskalResults %>%
+  select(Pigment, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlot_Algae <- ggplot(dunn_pairs, aes(x = Comparison, y = Pigment, fill = P.adj)) +
+  geom_tile() +
+  geom_tile(data = filter(dunn_pairs, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) 
+
+dunnPlot_Algae
+
+ggsave(dunnPlot_Algae, filename = "dunnPlot_Algae.png", width = 4, height = 6, bg = "white")
+```
+
+### All Sites (Red Samples)
+```{r}
+kruskalResultsR <- dfPig_long %>%
+  group_by(Pigment) %>%
+  filter(Color == "red") %>% 
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ APLoc, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value)
+  )
+
+
+# Step 2: Run Dunn's test
+kruskalResultsR <- kruskalResultsR %>%
+  mutate(
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(APLoc), data = .x, method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+#### Visualize Results
+```{r}
+dunn_pairsR <- kruskalResultsR %>%
+  select(Pigment, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlot_R <- ggplot(dunn_pairsR, aes(x = Comparison, y = Pigment, fill = P.adj)) +
+  geom_tile() +
+  geom_tile(data = filter(dunn_pairsR, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) 
+
+dunnPlot_R
+
+ggsave(dunnPlot_R, filename = "dunnPlot_R.png", width = 4, height = 6, bg = "white")
+```
+
+### All Sites (Green Samples)
+```{r}
+kruskalResultsG <- dfPig_long %>%
+  group_by(Pigment) %>%
+  filter(Color == "green") %>% 
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ APLoc, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value)
+  )
+
+
+# Step 2: Run Dunn's test
+kruskalResultsG <- kruskalResultsG %>%
+  mutate(
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(APLoc), data = .x, method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+#### Visualize Results
+```{r}
+dunn_pairsG <- kruskalResultsG %>%
+  select(Pigment, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlot_G <- ggplot(dunn_pairsG, aes(x = Comparison, y = Pigment, fill = P.adj)) +
+  geom_tile() +
+  geom_tile(data = filter(dunn_pairsG, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) 
+
+dunnPlot_G
+
+ggsave(dunnPlot_G, filename = "dunnPlot_G.png", width = 4, height = 6, bg = "white")
+```
+
+### All Sites (Clean Samples)
+```{r}
+kruskalResultsC <- dfPig_long %>%
+  group_by(Pigment) %>%
+  filter(Color == "clean") %>% 
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ APLoc, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value)
+  )
+
+
+# Step 2: Run Dunn's test
+kruskalResultsC <- kruskalResultsC %>%
+  mutate(
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(APLoc), data = .x, method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+#### Visualize Results
+```{r}
+dunn_pairsC <- kruskalResultsC %>%
+  select(Pigment, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlot_C <- ggplot(dunn_pairsC, aes(x = Comparison, y = Pigment, fill = P.adj)) +
+  geom_tile() +
+  geom_tile(data = filter(dunn_pairsC, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) 
+
+dunnPlot_C
+
+ggsave(dunnPlot_C, filename = "dunnPlot_C.png", width = 4, height = 6, bg = "white")
+```
+
+### Petermann Island {.tabset}
+
+#### All Samples
+```{r}
+# Run kruskal wallis test 
+kruskalResultsPI <- dfPig_long %>%
+  filter(Site == "Petermann Island") %>% 
+  group_by(Pigment) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ Date, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value)
+  )
+
+# Run Dunn's test 
+kruskalResultsPI <- kruskalResultsPI %>%
+  mutate(
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(Date), data = .x, method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+##### Visualize Results
+
+```{r}
+dunnPairsPI <- kruskalResultsPI %>%
+  select(Pigment, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlot_PI <- ggplot(dunnPairsPI, aes(x = Comparison, y = Pigment, fill = P.adj)) +
+  geom_tile() +
+  geom_tile(data = filter(dunnPairsPI, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) 
+
+dunnPlot_PI
+
+ggsave(dunnPlot_PI, filename = "dunnPlot_PI.png", width = 3, height = 6, bg = "white")
+```
+
+#### Red Samples
+
+```{r}
+# Run kruskal wallis test 
+kruskalResultsPI_Red <- dfPig_long %>%
+  filter(Site == "Petermann Island") %>% 
+  filter(Color == "red") %>% 
+  group_by(Pigment) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ Date, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value)
+  )
+
+# Run Dunn's test 
+kruskalResultsPI_Red <- kruskalResultsPI_Red %>%
+  mutate(
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(Date), data = .x, method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+##### Visualize Results
+
+```{r}
+dunnPairsPI_Red <- kruskalResultsPI_Red %>%
+  select(Pigment, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlot_PI_Red <- ggplot(dunnPairsPI_Red, aes(x = Comparison, y = Pigment, fill = P.adj)) +
+  geom_tile() +
+  geom_tile(data = filter(dunnPairsPI_Red, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) 
+
+dunnPlot_PI_Red
+
+ggsave(dunnPlot_PI_Red, filename = "dunnPlot_PI_Red.png", width = 3, height = 6, bg = "white")
+```
+
+#### Green Samples
+
+```{r}
+# Run kruskal wallis test 
+kruskalResultsPI_Green <- dfPig_long %>%
+  filter(Site == "Petermann Island") %>% 
+  filter(Color == "green") %>% 
+  group_by(Pigment) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ Date, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value)
+  )
+
+# Run Dunn's test 
+kruskalResultsPI_Green <- kruskalResultsPI_Green %>%
+  mutate(
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(Date), data = .x, method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+##### Visualize Results
+
+```{r}
+dunnPairsPI_Green <- kruskalResultsPI_Green %>%
+  select(Pigment, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlot_PI_Green <- ggplot(dunnPairsPI_Green, aes(x = Comparison, y = Pigment, fill = P.adj)) +
+  geom_tile() +
+  geom_tile(data = filter(dunnPairsPI_Green, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) 
+
+dunnPlot_PI_Green
+
+ggsave(dunnPlot_PI_Green, filename = "dunnPlot_PI_Green.png", width = 3, height = 6, bg = "white")
+```
+
+### Damoy Point {.tabset}
+
+#### All Samples
+
+```{r}
+# Run kruskal wallis test 
+kruskalResultsDP <- dfPig_long %>%
+  filter(Site == "Damoy Point") %>% 
+  group_by(Pigment) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ Date, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value)
+  )
+
+# Run Dunn's test 
+kruskalResultsDP <- kruskalResultsDP %>%
+  mutate(
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(Date), data = .x, method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+##### Visualize Results
+
+```{r}
+dunnPairsDP <- kruskalResultsDP %>%
+  select(Pigment, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlot_DP <- ggplot(dunnPairsDP, aes(x = Comparison, y = Pigment, fill = P.adj)) +
+  geom_tile() +
+  geom_tile(data = filter(dunnPairsDP, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) 
+
+dunnPlot_DP
+
+ggsave(dunnPlot_DP, filename = "dunnPlot_DP.png", width = 5, height = 6, bg = "white")
+```
+
+#### Red Samples
+
+```{r}
+# Run kruskal wallis test 
+kruskalResultsDP_Red <- dfPig_long %>%
+  filter(Site == "Damoy Point") %>% 
+  filter(Color == "red") %>% 
+  group_by(Pigment) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ Date, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value)
+  )
+
+# Run Dunn's test 
+kruskalResultsDP_Red <- kruskalResultsDP_Red %>%
+  mutate(
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(Date), data = .x, method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+##### Visualize Results
+
+```{r}
+dunnPairsDP_Red <- kruskalResultsDP_Red %>%
+  select(Pigment, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlot_DP_Red <- ggplot(dunnPairsDP_Red, aes(x = Comparison, y = Pigment, fill = P.adj)) +
+  geom_tile() +
+  geom_tile(data = filter(dunnPairsDP_Red, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) 
+
+dunnPlot_DP_Red
+
+ggsave(dunnPlot_DP_Red, filename = "dunnPlot_DP_Red.png", width = 5, height = 6, bg = "white")
+```
+
+#### Green Samples
+
+```{r}
+# Run kruskal wallis test 
+kruskalResultsDP_Green <- dfPig_long %>%
+  filter(Site == "Damoy Point") %>% 
+  filter(Color == "green") %>% 
+  group_by(Pigment) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ Date, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value)
+  )
+
+# Run Dunn's test 
+kruskalResultsDP_Green <- kruskalResultsDP_Green %>%
+  mutate(
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(Date), data = .x, method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+##### Visualize Results
+
+```{r}
+dunnPairsDP_Green <- kruskalResultsDP_Green %>%
+  select(Pigment, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlot_DP_Green <- ggplot(dunnPairsDP_Green, aes(x = Comparison, y = Pigment, fill = P.adj)) +
+  geom_tile() +
+  geom_tile(data = filter(dunnPairsDP_Green, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) 
+
+dunnPlot_DP_Green
+
+ggsave(dunnPlot_DP_Green, filename = "dunnPlot_DP_Green.png", width = 5, height = 6, bg = "white")
+```
+
+### Orne Harbour {.tabset}
+
+#### All Samples
+
+```{r}
+# Run kruskal wallis test 
+kruskalResultsOH <- dfPig_long %>%
+  filter(Site == "Orne Harbour") %>% 
+  group_by(Pigment) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ Date, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value)
+  )
+
+# Run Dunn's test 
+kruskalResultsOH <- kruskalResultsOH %>%
+  mutate(
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(Date), data = .x, method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+##### Visualize Results
+
+```{r}
+dunnPairsOH <- kruskalResultsOH %>%
+  select(Pigment, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlot_OH <- ggplot(dunnPairsOH, aes(x = Comparison, y = Pigment, fill = P.adj)) +
+  geom_tile() +
+  geom_tile(data = filter(dunnPairsOH, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) 
+
+dunnPlot_OH
+
+ggsave(dunnPlot_OH, filename = "dunnPlot_OH.png", width = 3, height = 6, bg = "white")
+```
+
+#### Red Samples
+
+```{r}
+# Run kruskal wallis test 
+kruskalResultsOH_Red <- dfPig_long %>%
+  filter(Site == "Orne Harbour") %>% 
+  filter(Color == "red") %>% 
+  group_by(Pigment) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ Date, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value)
+  )
+
+# Run Dunn's test 
+kruskalResultsOH_Red <- kruskalResultsOH_Red %>%
+  mutate(
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(Date), data = .x, method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+##### Visualize Results
+
+```{r}
+dunnPairsOH_Red <- kruskalResultsOH_Red %>%
+  select(Pigment, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlot_OH_Red <- ggplot(dunnPairsOH_Red, aes(x = Comparison, y = Pigment, fill = P.adj)) +
+  geom_tile() +
+  geom_tile(data = filter(dunnPairsOH_Red, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) 
+
+dunnPlot_OH_Red
+
+ggsave(dunnPlot_OH_Red, filename = "dunnPlot_OH_Red.png", width = 3, height = 6, bg = "white")
+```
+
+#### Green Samples
+
+```{r}
+# Run kruskal wallis test 
+kruskalResultsOH_Green <- dfPig_long %>%
+  filter(Site == "Orne Harbour") %>% 
+  filter(Color == "green") %>% 
+  group_by(Pigment) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ Date, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value)
+  )
+
+# Run Dunn's test 
+kruskalResultsOH_Green <- kruskalResultsOH_Green %>%
+  mutate(
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(Date), data = .x, method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+##### Visualize Results
+
+```{r}
+dunnPairsOH_Green <- kruskalResultsOH_Green %>%
+  select(Pigment, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlot_OH_Green <- ggplot(dunnPairsOH_Green, aes(x = Comparison, y = Pigment, fill = P.adj)) +
+  geom_tile() +
+  geom_tile(data = filter(dunnPairsOH_Green, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) 
+
+dunnPlot_OH_Green
+
+ggsave(dunnPlot_OH_Green, filename = "dunnPlot_OH_Green.png", width = 3, height = 6, bg = "white")
+```
+
+### Pléneau Island {.tabset}
+
+#### All Samples
+
+```{r}
+# Run kruskal wallis test 
+kruskalResultsPLE <- dfPig_long %>%
+  filter(Site == "Pléneau Island") %>% 
+  group_by(Pigment) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ Date, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value)
+  )
+
+# Run Dunn's test 
+kruskalResultsPLE <- kruskalResultsPLE %>%
+  mutate(
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(Date), data = .x, method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+##### Visualize Results
+
+```{r}
+dunnPairsPLE <- kruskalResultsPLE %>%
+  select(Pigment, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlot_PLE <- ggplot(dunnPairsPLE, aes(x = Comparison, y = Pigment, fill = P.adj)) +
+  geom_tile() +
+  geom_tile(data = filter(dunnPairsPLE, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) 
+
+dunnPlot_PLE
+
+ggsave(dunnPlot_PLE, filename = "dunnPlot_PLE.png", width = 3, height = 6, bg = "white")
+```
+
+#### Red Samples
+
+```{r}
+# Run kruskal wallis test 
+kruskalResultsPLE_Red <- dfPig_long %>%
+  filter(Site == "Pléneau Island") %>% 
+  filter(Color == "red") %>% 
+  group_by(Pigment) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ Date, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value)
+  )
+
+# Run Dunn's test 
+kruskalResultsPLE_Red <- kruskalResultsPLE_Red %>%
+  mutate(
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(Date), data = .x, method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+##### Visualize Results
+
+```{r}
+dunnPairsPLE_Red <- kruskalResultsPLE_Red %>%
+  select(Pigment, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlot_PLE_Red <- ggplot(dunnPairsPLE_Red, aes(x = Comparison, y = Pigment, fill = P.adj)) +
+  geom_tile() +
+  geom_tile(data = filter(dunnPairsPLE_Red, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) 
+
+dunnPlot_PLE_Red
+
+ggsave(dunnPlot_PLE_Red, filename = "dunnPlot_PLE_Red.png", width = 3, height = 6, bg = "white")
+```
+
+#### Green Samples
+
+```{r}
+# Run kruskal wallis test 
+kruskalResultsPLE_Green <- dfPig_long %>%
+  filter(Site == "Pléneau Island") %>% 
+  filter(Color == "green") %>% 
+  group_by(Pigment) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ Date, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value)
+  )
+
+# Run Dunn's test 
+kruskalResultsPLE_Green <- kruskalResultsPLE_Green %>%
+  mutate(
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(Date), data = .x, method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+##### Visualize Results
+
+```{r}
+dunnPairsPLE_Green <- kruskalResultsPLE_Green %>%
+  select(Pigment, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlot_PLE_Green <- ggplot(dunnPairsPLE_Green, aes(x = Comparison, y = Pigment, fill = P.adj)) +
+  geom_tile() +
+  geom_tile(data = filter(dunnPairsPLE_Green, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) 
+
+dunnPlot_PLE_Green
+
+ggsave(dunnPlot_PLE_Green, filename = "dunnPlot_PLE_Green.png", width = 3, height = 6, bg = "white")
+```
+
+# Box Plots {.tabset}
+
+## Algae Pigments (All Samples)
+```{r}
+boxplotAll <- dfPig_long %>%
+  ggplot(aes(x = Pigment, y = Concentration, fill = APLoc, color = APLoc)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = APPal) +
+  scale_color_manual(values = APPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotAll
+
+ggsave(boxplotAll, filename = "boxplotAll.png", width = 7, height = 5, bg = "white")
+```
+
+## All Pigments (Algae Samples)
+```{r}
+boxplotAlgae <- dfPig_long %>%
+  filter(Algae == "algae") %>% 
+  ggplot(aes(x = Pigment, y = Concentration, fill = APLoc, color = APLoc)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = APPal) +
+  scale_color_manual(values = APPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotAlgae
+
+ggsave(boxplotAlgae, filename = "boxplotAlgae.png", width = 7, height = 5, bg = "white")
+```
+
+## All Pigments (Red Samples)
+```{r}
+boxplotAlgaeR <- dfPig_long %>%
+  filter(Color == "red") %>% 
+  ggplot(aes(x = Pigment, y = Concentration, fill = APLoc, color = APLoc)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = APPal) +
+  scale_color_manual(values = APPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotAlgaeR
+
+ggsave(boxplotAlgaeR, filename = "boxplotAlgaeR.png", width = 7, height = 5, bg = "white")
+```
+
+## All Pigments (Green Samples)
+```{r}
+boxplotAlgaeG <- dfPig_long %>%
+  filter(Color == "green") %>% 
+  ggplot(aes(x = Pigment, y = Concentration, fill = APLoc, color = APLoc)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = APPal) +
+  scale_color_manual(values = APPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotAlgaeG
+
+ggsave(boxplotAlgaeG, filename = "boxplotAlgaeG.png", width = 7, height = 5, bg = "white")
+```
+
+## Astaxanthin {.tabset}
+```{r}
+boxplotAstax <- dfPig %>%
+  ggplot(aes(x = factor(APLoc, levels = c("North", "South")), 
+             y = Astaxanthin, 
+             fill = Color, 
+             color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotAstax
+
+ggsave(boxplotAstax, filename = "boxplotAstax.png", width = 7, height = 5, bg = "white")
+```
+
+```{r}
+boxplotAstax2 <- dfPig %>%
+  ggplot(aes(x = fct_reorder(Site, Latitude, .desc = TRUE), 
+               y = Astaxanthin, 
+               fill = Color, 
+               color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotAstax2
+
+ggsave(boxplotAstax2, filename = "boxplotAstax2.png", width = 7, height = 5, bg = "white")
+```
+
+## Beta Carotene
+```{r}
+boxplotBetaC <- dfPig %>%
+  ggplot(aes(x = factor(APLoc, levels = c("North", "South")), 
+             y = BetaC, 
+             fill = Color, 
+             color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotBetaC
+
+ggsave(boxplotBetaC, filename = "boxplotBetaC.png", width = 7, height = 5, bg = "white")
+```
+
+```{r}
+boxplotBetaC2 <- dfPig %>%
+  ggplot(aes(x = fct_reorder(Site, Latitude, .desc = TRUE), 
+               y = BetaC, 
+               fill = Color, 
+               color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotBetaC2
+
+ggsave(boxplotBetaC2, filename = "boxplotBetaC2.png", width = 7, height = 5, bg = "white")
+```
+
+## ChlA
+```{r}
+boxplotChlA <- dfPig %>%
+  ggplot(aes(x = factor(APLoc, levels = c("North", "South")), 
+             y = ChlA, 
+             fill = Color, 
+             color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotChlA
+
+ggsave(boxplotChlA, filename = "boxplotChlA.png", width = 7, height = 5, bg = "white")
+```
+
+```{r}
+boxplotChlA2 <- dfPig %>%
+  ggplot(aes(x = fct_reorder(Site, Latitude, .desc = TRUE), 
+               y = ChlA, 
+               fill = Color, 
+               color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotChlA2
+
+ggsave(boxplotChlA2, filename = "boxplotChlA2.png", width = 7, height = 5, bg = "white")
+```
+
+## ChlB
+```{r}
+boxplotChlB <- dfPig %>%
+  ggplot(aes(x = factor(APLoc, levels = c("North", "South")), 
+             y = ChlB, 
+             fill = Color, 
+             color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotChlB
+
+ggsave(boxplotChlB, filename = "boxplotChlB.png", width = 7, height = 5, bg = "white")
+```
+
+```{r}
+boxplotChlB2 <- dfPig %>%
+  ggplot(aes(x = fct_reorder(Site, Latitude, .desc = TRUE), 
+               y = ChlB, 
+               fill = Color, 
+               color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotChlB2
+
+ggsave(boxplotChlB2, filename = "boxplotChlB2.png", width = 7, height = 5, bg = "white")
+```
+
+## Lutein
+```{r}
+boxplotLutein <- dfPig %>%
+  ggplot(aes(x = factor(APLoc, levels = c("North", "South")), 
+             y = Lutein, 
+             fill = Color, 
+             color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotLutein
+
+ggsave(boxplotLutein, filename = "boxplotLutein.png", width = 7, height = 5, bg = "white")
+```
+
+```{r}
+boxplotLutein2 <- dfPig %>%
+  ggplot(aes(x = fct_reorder(Site, Latitude, .desc = TRUE), 
+               y = Lutein, 
+               fill = Color, 
+               color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotLutein2
+
+ggsave(boxplotLutein2, filename = "boxplotLutein2.png", width = 7, height = 5, bg = "white")
+```
+
+## Pheophorbide 
+```{r}
+boxplotPheophorbide <- dfPig %>%
+  ggplot(aes(x = factor(APLoc, levels = c("North", "South")), 
+             y = Pheophorbide, 
+             fill = Color, 
+             color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotPheophorbide
+
+ggsave(boxplotPheophorbide, filename = "boxplotPheophorbide.png", width = 7, height = 5, bg = "white")
+```
+
+```{r}
+boxplotPheophorbide2 <- dfPig %>%
+  ggplot(aes(x = fct_reorder(Site, Latitude, .desc = TRUE), 
+               y = Pheophorbide, 
+               fill = Color, 
+               color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotPheophorbide2
+
+ggsave(boxplotPheophorbide2, filename = "boxplotPheophorbide2.png", width = 7, height = 5, bg = "white")
+```
+
+## Pheophytin
+```{r}
+boxplotPheophytin <- dfPig %>%
+  ggplot(aes(x = factor(APLoc, levels = c("North", "South")), 
+             y = Pheophytin, 
+             fill = Color, 
+             color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotPheophytin
+
+ggsave(boxplotPheophytin, filename = "boxplotPheophytin.png", width = 7, height = 5, bg = "white")
+```
+
+```{r}
+boxplotPheophytin2 <- dfPig %>%
+  ggplot(aes(x = fct_reorder(Site, Latitude, .desc = TRUE), 
+               y = Pheophytin, 
+               fill = Color, 
+               color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotPheophytin2
+
+ggsave(boxplotPheophytin2, filename = "boxplotPheophytin2.png", width = 7, height = 5, bg = "white")
+```
+
+## Repeat Visits 
+
+### Petermann Island {.tabset}
+
+#### All 
+```{r}
+boxplotPI <- dfPig_long %>%
+  filter(Site == "Petermann Island") %>% 
+  ggplot(aes(x = Pigment, 
+             y = Concentration, 
+             fill = as.factor(Date),
+             color = as.factor(Date))) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotPI
+
+ggsave(boxplotPI, filename = "boxplotPI.png", width = 8, height = 5, bg = "white")
+```
+
+#### Algae 
+```{r}
+boxplotPI_algae <- dfPig_long %>%
+  filter(Site == "Petermann Island") %>% 
+  filter(Algae == "algae") %>% 
+  ggplot(aes(x = Pigment, 
+             y = Concentration, 
+             fill = as.factor(Date),
+             color = as.factor(Date))) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotPI_algae
+
+ggsave(boxplotPI_algae, filename = "boxplotPI_algae.png", width = 8, height = 5, bg = "white")
+```
+
+#### Red
+```{r}
+boxplotPI_R <- dfPig_long %>%
+  filter(Site == "Petermann Island") %>% 
+  filter(Color == "red") %>% 
+  ggplot(aes(x = Pigment, 
+             y = Concentration, 
+             fill = as.factor(Date),
+             color = as.factor(Date))) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotPI_R
+
+ggsave(boxplotPI_R, filename = "boxplotPI_R.png", width = 8, height = 5, bg = "white")
+```
+
+#### Green
+```{r}
+boxplotPI_G <- dfPig_long %>%
+  filter(Site == "Petermann Island") %>% 
+  filter(Color == "green") %>% 
+  ggplot(aes(x = Pigment, 
+             y = Concentration, 
+             fill = as.factor(Date),
+             color = as.factor(Date))) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotPI_G
+
+ggsave(boxplotPI_G, filename = "boxplotPI_G.png", width = 8, height = 5, bg = "white")
+```
+
+#### ChlA
+```{r}
+boxplotPIChlA <- dfPig %>%
+  filter(Site == "Petermann Island") %>% 
+  ggplot(aes(x = factor(Date), 
+             y = ChlA, 
+             fill = Color, 
+             color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotPIChlA
+
+ggsave(boxplotPIChlA, filename = "boxplotPIChlA.png", width = 7, height = 5, bg = "white")
+```
+
+#### Astaxanthin
+```{r}
+boxplotPIAstax <- dfPig %>%
+  filter(Site == "Petermann Island") %>% 
+  ggplot(aes(x = factor(Date), 
+             y = Astaxanthin, 
+             fill = Color, 
+             color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotPIAstax
+
+ggsave(boxplotPIAstax, filename = "boxplotPIAstax.png", width = 7, height = 5, bg = "white")
+```
+
+### Damoy Point {.tabset}
+
+#### All 
+```{r}
+boxplotDP <- dfPig_long %>%
+  filter(Site == "Damoy Point") %>% 
+  ggplot(aes(x = Pigment, 
+             y = Concentration, 
+             fill = as.factor(Date),
+             color = as.factor(Date))) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotDP
+
+ggsave(boxplotDP, filename = "boxplotDP.png", width = 8, height = 5, bg = "white")
+```
+
+#### Algae 
+```{r}
+boxplotDP_algae <- dfPig_long %>%
+  filter(Site == "Damoy Point") %>% 
+  filter(Algae == "algae") %>% 
+  ggplot(aes(x = Pigment, 
+             y = Concentration, 
+             fill = as.factor(Date),
+             color = as.factor(Date))) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotDP_algae
+
+ggsave(boxplotDP_algae, filename = "boxplotDP_algae.png", width = 8, height = 5, bg = "white")
+```
+
+#### Red
+```{r}
+boxplotDP_R <- dfPig_long %>%
+  filter(Site == "Damoy Point") %>% 
+  filter(Color == "red") %>% 
+  ggplot(aes(x = Pigment, 
+             y = Concentration, 
+             fill = as.factor(Date),
+             color = as.factor(Date))) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotDP_R
+
+ggsave(boxplotDP_R, filename = "boxplotDP_R.png", width = 8, height = 5, bg = "white")
+```
+
+#### Green
+```{r}
+boxplotDP_G <- dfPig_long %>%
+  filter(Site == "Damoy Point") %>% 
+  filter(Color == "green") %>% 
+  ggplot(aes(x = Pigment, 
+             y = Concentration, 
+             fill = as.factor(Date),
+             color = as.factor(Date))) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotDP_G
+
+ggsave(boxplotDP_G, filename = "boxplotDP_G.png", width = 8, height = 5, bg = "white")
+```
+
+#### ChlA
+```{r}
+boxplotDPChlA <- dfPig %>%
+  filter(Site == "Damoy Point") %>% 
+  ggplot(aes(x = factor(Date), 
+             y = ChlA, 
+             fill = Color, 
+             color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotDPChlA
+
+ggsave(boxplotDPChlA, filename = "boxplotDPChlA.png", width = 7, height = 5, bg = "white")
+```
+
+#### Astaxanthin
+```{r}
+boxplotDPAstax <- dfPig %>%
+  filter(Site == "Damoy Point") %>% 
+  ggplot(aes(x = factor(Date), 
+             y = Astaxanthin, 
+             fill = Color, 
+             color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotDPAstax
+
+ggsave(boxplotDPAstax, filename = "boxplotDPAstax.png", width = 7, height = 5, bg = "white")
+```
+
+### Orne Harbour {.tabset}
+
+#### All 
+```{r}
+boxplotOH <- dfPig_long %>%
+  filter(Site == "Orne Harbour") %>% 
+  ggplot(aes(x = Pigment, 
+             y = Concentration, 
+             fill = as.factor(Date),
+             color = as.factor(Date))) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotOH
+
+ggsave(boxplotOH, filename = "boxplotOH.png", width = 8, height = 5, bg = "white")
+```
+
+#### Algae 
+```{r}
+boxplotOH_algae <- dfPig_long %>%
+  filter(Site == "Orne Harbour") %>% 
+  filter(Algae == "algae") %>% 
+  ggplot(aes(x = Pigment, 
+             y = Concentration, 
+             fill = as.factor(Date),
+             color = as.factor(Date))) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotOH_algae
+
+ggsave(boxplotOH_algae, filename = "boxplotOH_algae.png", width = 8, height = 5, bg = "white")
+```
+
+#### Red
+```{r}
+boxplotOH_R <- dfPig_long %>%
+  filter(Site == "Orne Harbour") %>% 
+  filter(Color == "red") %>% 
+  ggplot(aes(x = Pigment, 
+             y = Concentration, 
+             fill = as.factor(Date),
+             color = as.factor(Date))) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotOH_R
+
+ggsave(boxplotOH_R, filename = "boxplotOH_R.png", width = 8, height = 5, bg = "white")
+```
+
+#### Green
+```{r}
+boxplotOH_G <- dfPig_long %>%
+  filter(Site == "Orne Harbour") %>% 
+  filter(Color == "green") %>% 
+  ggplot(aes(x = Pigment, 
+             y = Concentration, 
+             fill = as.factor(Date),
+             color = as.factor(Date))) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotOH_G
+
+ggsave(boxplotOH_G, filename = "boxplotOH_G.png", width = 8, height = 5, bg = "white")
+```
+
+#### ChlA
+```{r}
+boxplotOHChlA <- dfPig %>%
+  filter(Site == "Orne Harbour") %>% 
+  ggplot(aes(x = factor(Date), 
+             y = ChlA, 
+             fill = Color, 
+             color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotOHChlA
+
+ggsave(boxplotOHChlA, filename = "boxplotOHChlA.png", width = 7, height = 5, bg = "white")
+```
+
+#### Astaxanthin
+```{r}
+boxplotOHAstax <- dfPig %>%
+  filter(Site == "Orne Harbour") %>% 
+  ggplot(aes(x = factor(Date), 
+             y = Astaxanthin, 
+             fill = Color, 
+             color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotOHAstax
+
+ggsave(boxplotOHAstax, filename = "boxplotOHAstax.png", width = 7, height = 5, bg = "white")
+```
+
+### Pléneau Island {.tabset}
+
+#### All 
+```{r}
+boxplotPLE <- dfPig_long %>%
+  filter(Site == "Pléneau Island") %>% 
+  ggplot(aes(x = Pigment, 
+             y = Concentration, 
+             fill = as.factor(Date),
+             color = as.factor(Date))) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotPLE
+
+ggsave(boxplotPLE, filename = "boxplotPLE.png", width = 8, height = 5, bg = "white")
+```
+
+#### Algae 
+```{r}
+boxplotPLE_algae <- dfPig_long %>%
+  filter(Site == "Pléneau Island") %>% 
+  filter(Algae == "algae") %>% 
+  ggplot(aes(x = Pigment, 
+             y = Concentration, 
+             fill = as.factor(Date),
+             color = as.factor(Date))) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotPLE_algae
+
+ggsave(boxplotPLE_algae, filename = "boxplotPLE_algae.png", width = 8, height = 5, bg = "white")
+```
+
+#### Red
+```{r}
+boxplotPLE_R <- dfPig_long %>%
+  filter(Site == "Pléneau Island") %>% 
+  filter(Color == "red") %>% 
+  ggplot(aes(x = Pigment, 
+             y = Concentration, 
+             fill = as.factor(Date),
+             color = as.factor(Date))) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotPLE_R
+
+ggsave(boxplotPLE_R, filename = "boxplotPLE_R.png", width = 8, height = 5, bg = "white")
+```
+
+#### Green
+```{r}
+boxplotPLE_G <- dfPig_long %>%
+  filter(Site == "Pléneau Island") %>% 
+  filter(Color == "green") %>% 
+  ggplot(aes(x = Pigment, 
+             y = Concentration, 
+             fill = as.factor(Date),
+             color = as.factor(Date))) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotPLE_G
+
+ggsave(boxplotPLE_G, filename = "boxplotPLE_G.png", width = 8, height = 5, bg = "white")
+```
+
+#### ChlA
+```{r}
+boxplotPLEChlA <- dfPig %>%
+  filter(Site == "Pléneau Island") %>% 
+  ggplot(aes(x = factor(Date), 
+             y = ChlA, 
+             fill = Color, 
+             color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotPLEChlA
+
+ggsave(boxplotPLEChlA, filename = "boxplotPLEChlA.png", width = 7, height = 5, bg = "white")
+```
+
+#### Astaxanthin
+```{r}
+boxplotPLEAstax <- dfPig %>%
+  filter(Site == "Pléneau Island") %>% 
+  ggplot(aes(x = factor(Date), 
+             y = Astaxanthin, 
+             fill = Color, 
+             color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (ppb)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotPLEAstax
+
+ggsave(boxplotPLEAstax, filename = "boxplotPLEAstax.png", width = 7, height = 5, bg = "white")
+```
+
+# Pairs Plots - Pigments {.tabset}
+
+## North
+```{r, warning = FALSE, message = FALSE}
+corplotNorth <- dfPig %>% 
+  filter(APLoc == "North") %>% 
+  ggpairs(
+  columns = c("Astaxanthin", "Lutein", "ChlA", "ChlB", "BetaC", "Pheophorbide", "Pheophytin"), 
+  aes(color = Color, fill = Color, alpha = 0.8),
+  diag = list(continuous = wrap("barDiag")),
+  lower = list(continuous = wrap("points", na.rm = TRUE)),
+  upper = list(continuous = wrap("cor", size = 3, na.rm = TRUE))
+) + 
+  theme_minimal() +
+  pairsplot_theme + 
+  scale_color_manual(values = colorPal) + 
+  scale_fill_manual(values = colorPal) 
+   
+
+corplotNorth
+
+ggsave(corplotNorth, filename = "corplotNorth.png", width = 7, height = 7, bg = "white")
+```
+
+## South
+```{r, warning = FALSE, message = FALSE}
+corplotSouth <- dfPig %>% 
+  filter(APLoc == "South") %>% 
+  ggpairs(
+  columns = c("Astaxanthin", "Lutein", "ChlA", "ChlB", "BetaC", "Pheophorbide", "Pheophytin"), 
+  aes(color = Color, fill = Color, alpha = 0.8),
+  diag = list(continuous = wrap("barDiag")),
+  lower = list(continuous = wrap("points", na.rm = TRUE)),
+  upper = list(continuous = wrap("cor", size = 3, na.rm = TRUE))
+) + 
+  theme_minimal() +
+  pairsplot_theme + 
+  scale_color_manual(values = colorPal) + 
+  scale_fill_manual(values = colorPal) 
+   
+
+corplotSouth
+
+ggsave(corplotSouth, filename = "corplotSouth.png", width = 7, height = 7, bg = "white")
+```
+
+# Heat Maps - Pigments {.tabset}
+
+## All Sites (All Samples)
+```{r}
+cor.mtest <- function(mat, method = "spearman") {
+  mat <- as.matrix(mat)
+  n <- ncol(mat)
+  p.mat <- matrix(NA, n, n)
+  diag(p.mat) <- 0
+  for (i in 1:(n - 1)) {
+    for (j in (i + 1):n) {
+      tmp <- cor.test(mat[, i], mat[, j], method = method)
+      p.mat[i, j] <- p.mat[j, i] <- tmp$p.value
+    }
+  }
+  colnames(p.mat) <- rownames(p.mat) <- colnames(mat)
+  return(list(p = p.mat))
+}
+
+# Define pigment variables
+pigment_vars <- c("Astaxanthin", "Lutein", "ChlA", "ChlB", "BetaC", "Pheophorbide", "Pheophytin")
+
+# List of locations
+locations <- unique(dfPig$APLoc)
+
+# Function to calculate correlation matrices for each location
+get_corr_data <- function(location) {
+  data_sub <- dfPig %>%
+    filter(APLoc == location) %>%
+    select(all_of(pigment_vars)) %>%
+    na.omit()
+
+  cor_matrix <- cor(data_sub, method = "spearman")
+  p_matrix <- cor.mtest(data_sub, method = "spearman")$p
+
+  cor_long <- reshape2::melt(cor_matrix)
+  p_long <- reshape2::melt(p_matrix)
+
+  merged <- merge(cor_long, p_long, by = c("Var1", "Var2"))
+  colnames(merged) <- c("Variable1", "Variable2", "Spearman_r", "p_value")
+  merged$Location <- location
+
+  return(merged)
+}
+
+# Apply across locations
+heatmap_data <- do.call(rbind, lapply(locations, get_corr_data))
+
+# Factor levels for correct ordering
+heatmap_data$Variable1 <- factor(heatmap_data$Variable1, levels = pigment_vars)
+heatmap_data$Variable2 <- factor(heatmap_data$Variable2, levels = pigment_vars)
+
+# Create label
+heatmap_data$label <- paste0(round(heatmap_data$Spearman_r, 2), "\n(p=", round(heatmap_data$p_value, 3), ")")
+heatmap_data$significant <- heatmap_data$p_value < 0.05
+
+# Remove upper triangle + diagonal if desired (optional)
+heatmap_data <- heatmap_data %>%
+  filter(as.numeric(Variable1) > as.numeric(Variable2))
+
+# Plot
+heatmapPigAll <- ggplot(heatmap_data, aes(x = Variable1, y = Variable2, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = subset(heatmap_data, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  facet_wrap(~Location) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_blank()) 
+
+heatmapPigAll
+
+ggsave(heatmapPigAll, filename = "heatmapPigAll.png", width = 8, height = 5, bg = "white")
+
+```
+
+## North and South Regions (Red Samples)
+```{r}
+cor.mtest <- function(mat, method = "spearman") {
+  mat <- as.matrix(mat)
+  n <- ncol(mat)
+  p.mat <- matrix(NA, n, n)
+  diag(p.mat) <- 0
+  for (i in 1:(n - 1)) {
+    for (j in (i + 1):n) {
+      tmp <- cor.test(mat[, i], mat[, j], method = method)
+      p.mat[i, j] <- p.mat[j, i] <- tmp$p.value
+    }
+  }
+  colnames(p.mat) <- rownames(p.mat) <- colnames(mat)
+  return(list(p = p.mat))
+}
+
+# Define pigment variables
+pigment_vars <- c("Astaxanthin", "Lutein", "ChlA", "ChlB", "BetaC", "Pheophorbide", "Pheophytin")
+
+# List of locations
+locations <- unique(dfPig$APLoc)
+
+get_corr_data <- function(location) {
+  data_sub <- dfPig %>%
+    filter(APLoc %in% c("North", "South")) %>%
+    filter(APLoc == location) %>%
+    filter(Color == "red") %>%
+    select(all_of(pigment_vars)) %>%
+    mutate(across(everything(), ~ as.numeric(as.character(.)))) %>%  # ensure numeric
+    na.omit()
+
+  # Skip if less than 2 rows after filtering
+  if (nrow(data_sub) < 2) return(NULL)
+
+  cor_matrix <- cor(data_sub, method = "spearman")
+  p_matrix <- cor.mtest(data_sub, method = "spearman")$p
+
+  cor_long <- reshape2::melt(cor_matrix)
+  p_long <- reshape2::melt(p_matrix)
+
+  merged <- merge(cor_long, p_long, by = c("Var1", "Var2"))
+  colnames(merged) <- c("Variable1", "Variable2", "Spearman_r", "p_value")
+  merged$Location <- location
+
+  return(merged)
+}
+
+# Only keep locations with at least 2 "algae" rows
+locations_to_use <- dfPig %>%
+  filter(APLoc %in% c("North", "South"), Algae == "algae") %>%
+  group_by(APLoc) %>%
+  filter(n() >= 2) %>%
+  pull(APLoc) %>%
+  unique()
+
+heatmap_data <- do.call(rbind, lapply(locations_to_use, get_corr_data))
+
+# Factor levels for correct ordering
+heatmap_data$Variable1 <- factor(heatmap_data$Variable1, levels = pigment_vars)
+heatmap_data$Variable2 <- factor(heatmap_data$Variable2, levels = pigment_vars)
+
+# Create label
+heatmap_data$label <- paste0(round(heatmap_data$Spearman_r, 2), "\n(p=", round(heatmap_data$p_value, 3), ")")
+heatmap_data$significant <- heatmap_data$p_value < 0.05
+
+# Remove upper triangle + diagonal if desired (optional)
+heatmap_data <- heatmap_data %>%
+  filter(as.numeric(Variable1) > as.numeric(Variable2))
+
+# Plot
+heatmapPigRed <- ggplot(heatmap_data, aes(x = Variable1, y = Variable2, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = subset(heatmap_data, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  facet_wrap(~Location) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_blank()) 
+
+heatmapPigRed
+
+ggsave(heatmapPigRed, filename = "heatmapPigRed.png", width = 8, height = 5, bg = "white")
+
+```
+
+## North and South Regions (Green Samples)
+```{r}
+cor.mtest <- function(mat, method = "spearman") {
+  mat <- as.matrix(mat)
+  n <- ncol(mat)
+  p.mat <- matrix(NA, n, n)
+  diag(p.mat) <- 0
+  for (i in 1:(n - 1)) {
+    for (j in (i + 1):n) {
+      tmp <- cor.test(mat[, i], mat[, j], method = method)
+      p.mat[i, j] <- p.mat[j, i] <- tmp$p.value
+    }
+  }
+  colnames(p.mat) <- rownames(p.mat) <- colnames(mat)
+  return(list(p = p.mat))
+}
+
+# Define pigment variables
+pigment_vars <- c("Astaxanthin", "Lutein", "ChlA", "ChlB", "BetaC", "Pheophorbide", "Pheophytin")
+
+# List of locations
+locations <- unique(dfPig$APLoc)
+
+get_corr_data <- function(location) {
+  data_sub <- dfPig %>%
+    filter(APLoc %in% c("North", "South")) %>%
+    filter(APLoc == location) %>%
+    filter(Color == "green") %>%
+    select(all_of(pigment_vars)) %>%
+    mutate(across(everything(), ~ as.numeric(as.character(.)))) %>%  # ensure numeric
+    na.omit()
+
+  # Skip if less than 2 rows after filtering
+  if (nrow(data_sub) < 2) return(NULL)
+
+  cor_matrix <- cor(data_sub, method = "spearman")
+  p_matrix <- cor.mtest(data_sub, method = "spearman")$p
+
+  cor_long <- reshape2::melt(cor_matrix)
+  p_long <- reshape2::melt(p_matrix)
+
+  merged <- merge(cor_long, p_long, by = c("Var1", "Var2"))
+  colnames(merged) <- c("Variable1", "Variable2", "Spearman_r", "p_value")
+  merged$Location <- location
+
+  return(merged)
+}
+
+# Only keep locations with at least 2 "algae" rows
+locations_to_use <- dfPig %>%
+  filter(APLoc %in% c("North", "South"), Algae == "algae") %>%
+  group_by(APLoc) %>%
+  filter(n() >= 2) %>%
+  pull(APLoc) %>%
+  unique()
+
+heatmap_data <- do.call(rbind, lapply(locations_to_use, get_corr_data))
+
+# Factor levels for correct ordering
+heatmap_data$Variable1 <- factor(heatmap_data$Variable1, levels = pigment_vars)
+heatmap_data$Variable2 <- factor(heatmap_data$Variable2, levels = pigment_vars)
+
+# Create label
+heatmap_data$label <- paste0(round(heatmap_data$Spearman_r, 2), "\n(p=", round(heatmap_data$p_value, 3), ")")
+heatmap_data$significant <- heatmap_data$p_value < 0.05
+
+# Remove upper triangle + diagonal if desired (optional)
+heatmap_data <- heatmap_data %>%
+  filter(as.numeric(Variable1) > as.numeric(Variable2))
+
+# Plot
+heatmapPigGreen <- ggplot(heatmap_data, aes(x = Variable1, y = Variable2, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = subset(heatmap_data, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  facet_wrap(~Location) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_blank()) 
+
+heatmapPigGreen
+
+ggsave(heatmapPigGreen, filename = "heatmapPigGreen.png", width = 8, height = 5, bg = "white")
+
+```
+
+# Scatter Plots - Pigments & Anions
+
+## North Region {.tabset}
+
+### ChlA
+```{r}
+scatterMatrixNorthChlA <- dfAnion_long %>% 
+  filter(APLoc == "North") %>% 
+  ggplot(aes(x = Concentration, y = ChlA, color = Color)) +
+  geom_point(alpha = 0.6) + 
+  geom_smooth(method = "lm", se = FALSE, linetype = "solid", linewidth = 0.8) +
+  scale_color_manual(values = colorPal) +
+  scale_x_sqrt() +
+  facet_grid(. ~ Anion, scales = "free_x") +
+  theme_minimal() + 
+  plot_theme2 + 
+  theme(axis.text.x = element_text(size = 10)) + 
+  labs(x = "Anion Concentration (ppm)",
+       y = "ChlA ",
+       color = NULL)
+
+scatterMatrixNorthChlA
+```
+
+### ChlB
+```{r}
+scatterMatrixNorthChlB <- dfAnion_long %>% 
+  filter(APLoc == "North") %>%
+  ggplot(aes(x = Concentration, y = ChlB, color = Color)) +
+  geom_point(alpha = 0.6) + 
+  geom_smooth(method = "lm", se = FALSE, linetype = "solid", linewidth = 0.8) +
+  scale_color_manual(values = colorPal) +
+  scale_x_sqrt() +
+  facet_grid(. ~ Anion, scales = "free_x") +
+  theme_minimal() + 
+  plot_theme2 + 
+  theme(axis.text.x = element_text(size = 10)) + 
+  labs(x = "Anion Concentration (ppm)",
+       y = "ChlB ",
+       color = NULL)
+
+scatterMatrixNorthChlB
+```
+
+### Astaxanthin
+```{r}
+scatterMatrixNorthAstaxanthin <- dfAnion_long %>% 
+  filter(APLoc == "North") %>%
+  ggplot(aes(x = Concentration, y = Astaxanthin, color = Color)) +
+  geom_point(alpha = 0.6) + 
+  geom_smooth(method = "lm", se = FALSE, linetype = "solid", linewidth = 0.8) +
+  scale_color_manual(values = colorPal) +
+  scale_x_sqrt() +
+  facet_grid(. ~ Anion, scales = "free_x") +
+  theme_minimal() + 
+  plot_theme2 + 
+  theme(axis.text.x = element_text(size = 10)) + 
+  labs(x = "Anion Concentration (ppm)",
+       y = "Astaxanthin ",
+       color = NULL)
+
+scatterMatrixNorthAstaxanthin
+```
+
+### Lutein
+```{r}
+scatterMatrixNorthLutein <- dfAnion_long %>% 
+  filter(APLoc == "North") %>% 
+  ggplot(aes(x = Concentration, y = Lutein, color = Color)) +
+  geom_point(alpha = 0.6) + 
+  geom_smooth(method = "lm", se = FALSE, linetype = "solid", linewidth = 0.8) +
+  scale_color_manual(values = colorPal) +
+  scale_x_sqrt() +
+  facet_grid(. ~ Anion, scales = "free_x") +
+  theme_minimal() + 
+  plot_theme2 + 
+  theme(axis.text.x = element_text(size = 10)) + 
+  labs(x = "Anion Concentration (ppm)",
+       y = "Lutein ",
+       color = NULL)
+
+scatterMatrixNorthLutein
+```
+
+### BetaC
+```{r}
+scatterMatrixNorthBetaC <- dfAnion_long %>% 
+  filter(APLoc == "North") %>%
+  ggplot(aes(x = Concentration, y = BetaC, color = Color)) +
+  geom_point(alpha = 0.6) + 
+  geom_smooth(method = "lm", se = FALSE, linetype = "solid", linewidth = 0.8) +
+  scale_color_manual(values = colorPal) +
+  scale_x_sqrt() +
+  facet_grid(. ~ Anion, scales = "free_x") +
+  theme_minimal() + 
+  plot_theme2 + 
+  theme(axis.text.x = element_text(size = 10)) + 
+  labs(x = "Anion Concentration (ppm)",
+       y = "BetaC ",
+       color = NULL)
+
+scatterMatrixNorthBetaC
+```
+
+### Pheophytin
+```{r}
+scatterMatrixNorthPheophytin <- dfAnion_long %>% 
+  filter(APLoc == "North") %>%
+  ggplot(aes(x = Concentration, y = Pheophytin, color = Color)) +
+  geom_point(alpha = 0.6) + 
+  geom_smooth(method = "lm", se = FALSE, linetype = "solid", linewidth = 0.8) +
+  scale_color_manual(values = colorPal) +
+  scale_x_sqrt() +
+  facet_grid(. ~ Anion, scales = "free_x") +
+  theme_minimal() + 
+  plot_theme2 + 
+  theme(axis.text.x = element_text(size = 10)) + 
+  labs(x = "Anion Concentration (ppm)",
+       y = "Pheophytin ",
+       color = NULL)
+
+scatterMatrixNorthPheophytin
+```
+
+### Pheophorbide
+```{r}
+scatterMatrixNorthPheophorbide <- dfAnion_long %>% 
+  filter(APLoc == "North") %>% 
+  ggplot(aes(x = Concentration, y = Pheophorbide, color = Color)) +
+  geom_point(alpha = 0.6) + 
+  geom_smooth(method = "lm", se = FALSE, linetype = "solid", linewidth = 0.8) +
+  scale_color_manual(values = colorPal) +
+  scale_x_sqrt() +
+  facet_grid(. ~ Anion, scales = "free_x") +
+  theme_minimal() + 
+  plot_theme2 + 
+  theme(axis.text.x = element_text(size = 10)) + 
+  labs(x = "Anion Concentration (ppm)",
+       y = "Pheophorbide ",
+       color = NULL)
+
+scatterMatrixNorthPheophorbide
+```
+
+### Combined
+```{r}
+scatterMatrixNorthChlA <- scatterMatrixNorthChlA + theme(axis.title.x = element_blank(), axis.text.x = element_blank())
+scatterMatrixNorthChlB <- scatterMatrixNorthChlB + theme(axis.title.x = element_blank(), axis.text.x = element_blank())
+scatterMatrixNorthAstaxanthin <- scatterMatrixNorthAstaxanthin + theme(axis.title.x = element_blank(), axis.text.x = element_blank())
+scatterMatrixNorthLutein <- scatterMatrixNorthLutein + theme(axis.title.x = element_blank(), axis.text.x = element_blank())
+scatterMatrixNorthPheophorbide <- scatterMatrixNorthPheophorbide + theme(axis.title.x = element_blank(), axis.text.x = element_blank())
+
+scatterMatrixNorth <- (
+  scatterMatrixNorthChlA /
+  scatterMatrixNorthChlB /
+  scatterMatrixNorthAstaxanthin /
+  scatterMatrixNorthLutein /
+  scatterMatrixNorthBetaC 
+) +
+  plot_layout(guides = "collect", heights = c(1,1,1,1,1)) &
+  theme(legend.position = "bottom",
+        plot.margin = margin(2, 2, 2, 2)) 
+
+scatterMatrixNorth
+
+ggsave(scatterMatrixNorth, filename = "scatterMatrixNorth.png", width = 8, height = 9.5, bg = "white")
+```
+
+```{r}
+scatterMatrixNorthDeg <- (
+  scatterMatrixNorthPheophorbide /
+  scatterMatrixNorthPheophytin 
+) +
+  plot_layout(guides = "collect", heights = c(1,1)) &
+  theme(legend.position = "bottom",
+        plot.margin = margin(2,2,2,2)) 
+
+scatterMatrixNorthDeg
+
+ggsave(scatterMatrixNorthDeg, filename = "scatterMatrixNorthDeg.png", width = 8, height = 5, bg = "white")
+```
+
+## South Region {.tabset}
+
+### ChlA
+```{r}
+scatterMatrixSouthChlA <- dfAnion_long %>% 
+  filter(APLoc == "South") %>% 
+  ggplot(aes(x = Concentration, y = ChlA, color = Color)) +
+  geom_point(alpha = 0.6) + 
+  geom_smooth(method = "lm", se = FALSE, linetype = "solid", linewidth = 0.8) +
+  scale_color_manual(values = colorPal) +
+  scale_x_sqrt() +
+  facet_grid(. ~ Anion, scales = "free_x") +
+  theme_minimal() + 
+  plot_theme2 + 
+  theme(axis.text.x = element_text(size = 10)) + 
+  labs(x = "Anion Concentration (ppm)",
+       y = "ChlA ",
+       color = NULL)
+
+scatterMatrixSouthChlA
+```
+
+### ChlB
+```{r}
+scatterMatrixSouthChlB <- dfAnion_long %>% 
+  filter(APLoc == "South") %>%
+  ggplot(aes(x = Concentration, y = ChlB, color = Color)) +
+  geom_point(alpha = 0.6) + 
+  geom_smooth(method = "lm", se = FALSE, linetype = "solid", linewidth = 0.8) +
+  scale_color_manual(values = colorPal) +
+  scale_x_sqrt() +
+  facet_grid(. ~ Anion, scales = "free_x") +
+  theme_minimal() + 
+  plot_theme2 + 
+  theme(axis.text.x = element_text(size = 10)) + 
+  labs(x = "Anion Concentration (ppm)",
+       y = "ChlB ",
+       color = NULL)
+
+scatterMatrixSouthChlB
+```
+
+### Astaxanthin
+```{r}
+scatterMatrixSouthAstaxanthin <- dfAnion_long %>% 
+  filter(APLoc == "South") %>%
+  ggplot(aes(x = Concentration, y = Astaxanthin, color = Color)) +
+  geom_point(alpha = 0.6) + 
+  geom_smooth(method = "lm", se = FALSE, linetype = "solid", linewidth = 0.8) +
+  scale_color_manual(values = colorPal) +
+  scale_x_sqrt() +
+  facet_grid(. ~ Anion, scales = "free_x") +
+  theme_minimal() + 
+  plot_theme2 + 
+  theme(axis.text.x = element_text(size = 10)) + 
+  labs(x = "Anion Concentration (ppm)",
+       y = "Astaxanthin ",
+       color = NULL)
+
+scatterMatrixSouthAstaxanthin
+```
+
+### Lutein
+```{r}
+scatterMatrixSouthLutein <- dfAnion_long %>% 
+  filter(APLoc == "South") %>% 
+  ggplot(aes(x = Concentration, y = Lutein, color = Color)) +
+  geom_point(alpha = 0.6) + 
+  geom_smooth(method = "lm", se = FALSE, linetype = "solid", linewidth = 0.8) +
+  scale_color_manual(values = colorPal) +
+  scale_x_sqrt() +
+  facet_grid(. ~ Anion, scales = "free_x") +
+  theme_minimal() + 
+  plot_theme2 + 
+  theme(axis.text.x = element_text(size = 10)) + 
+  labs(x = "Anion Concentration (ppm)",
+       y = "Lutein ",
+       color = NULL)
+
+scatterMatrixSouthLutein
+```
+
+### BetaC
+```{r}
+scatterMatrixSouthBetaC <- dfAnion_long %>% 
+  filter(APLoc == "South") %>%
+  ggplot(aes(x = Concentration, y = BetaC, color = Color)) +
+  geom_point(alpha = 0.6) + 
+  geom_smooth(method = "lm", se = FALSE, linetype = "solid", linewidth = 0.8) +
+  scale_color_manual(values = colorPal) +
+  scale_x_sqrt() +
+  facet_grid(. ~ Anion, scales = "free_x") +
+  theme_minimal() + 
+  plot_theme2 + 
+  theme(axis.text.x = element_text(size = 10)) + 
+  labs(x = "Anion Concentration (ppm)",
+       y = "BetaC ",
+       color = NULL)
+
+scatterMatrixSouthBetaC
+```
+
+### Pheophytin
+```{r}
+scatterMatrixSouthPheophytin <- dfAnion_long %>% 
+  filter(APLoc == "South") %>%
+  ggplot(aes(x = Concentration, y = Pheophytin, color = Color)) +
+  geom_point(alpha = 0.6) + 
+  geom_smooth(method = "lm", se = FALSE, linetype = "solid", linewidth = 0.8) +
+  scale_color_manual(values = colorPal) +
+  scale_x_sqrt() +
+  facet_grid(. ~ Anion, scales = "free_x") +
+  theme_minimal() + 
+  plot_theme2 + 
+  theme(axis.text.x = element_text(size = 10)) + 
+  labs(x = "Anion Concentration (ppm)",
+       y = "Pheophytin ",
+       color = NULL)
+
+scatterMatrixSouthPheophytin
+```
+
+### Pheophorbide
+```{r}
+scatterMatrixSouthPheophorbide <- dfAnion_long %>% 
+  filter(APLoc == "South") %>% 
+  ggplot(aes(x = Concentration, y = Pheophorbide, color = Color)) +
+  geom_point(alpha = 0.6) + 
+  geom_smooth(method = "lm", se = FALSE, linetype = "solid", linewidth = 0.8) +
+  scale_color_manual(values = colorPal) +
+  scale_x_sqrt() +
+  facet_grid(. ~ Anion, scales = "free_x") +
+  theme_minimal() + 
+  plot_theme2 + 
+  theme(axis.text.x = element_text(size = 10)) + 
+  labs(x = "Anion Concentration (ppm)",
+       y = "Pheophorbide ",
+       color = NULL)
+
+scatterMatrixSouthPheophorbide
+```
+
+### Combined
+```{r}
+scatterMatrixSouthChlA <- scatterMatrixSouthChlA + theme(axis.title.x = element_blank(), axis.text.x = element_blank())
+scatterMatrixSouthChlB <- scatterMatrixSouthChlB + theme(axis.title.x = element_blank(), axis.text.x = element_blank())
+scatterMatrixSouthAstaxanthin <- scatterMatrixSouthAstaxanthin + theme(axis.title.x = element_blank(), axis.text.x = element_blank())
+scatterMatrixSouthLutein <- scatterMatrixSouthLutein + theme(axis.title.x = element_blank(), axis.text.x = element_blank())
+scatterMatrixSouthPheophorbide <- scatterMatrixSouthPheophorbide + theme(axis.title.x = element_blank(), axis.text.x = element_blank())
+
+scatterMatrixSouth <- (
+  scatterMatrixSouthChlA /
+  scatterMatrixSouthChlB /
+  scatterMatrixSouthAstaxanthin /
+  scatterMatrixSouthLutein /
+  scatterMatrixSouthBetaC 
+) +
+  plot_layout(guides = "collect", heights = c(1,1,1,1,1)) &
+  theme(legend.position = "bottom",
+        plot.margin = margin(2, 2, 2, 2)) 
+
+scatterMatrixSouth
+
+ggsave(scatterMatrixSouth, filename = "scatterMatrixSouth.png", width = 8, height = 9.5, bg = "white")
+```
+
+```{r}
+scatterMatrixSouthDeg <- (
+  scatterMatrixSouthPheophorbide /
+  scatterMatrixSouthPheophytin 
+) +
+  plot_layout(guides = "collect", heights = c(1,1)) &
+  theme(legend.position = "bottom",
+        plot.margin = margin(2,2,2,2)) 
+
+scatterMatrixSouthDeg
+
+ggsave(scatterMatrixSouthDeg, filename = "scatterMatrixSouthDeg.png", width = 8, height = 5, bg = "white")
+```
+
+# Heat Maps - Pigments & Anions {.tabset}
+
+## North and South Regions (All Samples)
+```{r}
+# Define pigment and anion variables
+pigment_vars <- c("ChlA", "ChlB", "Astaxanthin", "Lutein", "BetaC", "Pheophorbide", "Pheophytin")
+anion_vars <- c("Cl", "NO2NO3", "SO42", "PO43", "Fo")
+
+# Filter to just the necessary columns & regions
+df_filtered <- dfAnion %>%
+  select(APLoc, all_of(pigment_vars), all_of(anion_vars)) %>%
+  filter(APLoc %in% c("North", "South")) %>%
+  na.omit()
+
+# Function to compute pigment–anion Spearman correlations per region
+get_pigment_anion_corr <- function(data, aploc_name) {
+  cor_matrix <- rcorr(as.matrix(data[, -1]), type = "spearman")
+
+  r_vals <- cor_matrix$r
+  p_vals <- cor_matrix$P
+
+  # Create all pigment–anion pair combinations
+  pairs <- expand.grid(Pigment = pigment_vars, Anion = anion_vars, stringsAsFactors = FALSE)
+
+  results <- pairs %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[Anion, Pigment],
+      p_value = p_vals[Anion, Pigment],
+      significant = p_value < 0.05,
+      label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+      APLoc = aploc_name
+    ) %>%
+    ungroup()
+
+  return(results)
+}
+
+# Compute correlations for each APLoc region
+cor_results <- df_filtered %>%
+  group_split(APLoc) %>%
+  map_dfr(~get_pigment_anion_corr(.x, unique(.x$APLoc)))
+
+# Convert to factors to preserve axis order
+cor_results$Pigment <- factor(cor_results$Pigment, levels = pigment_vars)
+cor_results$Anion <- factor(cor_results$Anion, levels = anion_vars)
+
+# Plot
+heatmapPigAnion <- ggplot(cor_results, aes(x = Pigment, y = Anion, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = filter(cor_results, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  facet_wrap(~APLoc, ncol = 1) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0, name = "Spearman r") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  )
+
+heatmapPigAnion
+
+ggsave(heatmapPigAnion, filename = "heatmapPigAnion.png", width = 7, height = 9, bg = "white")
+```
+
+## North and South Regions (Red Samples)
+```{r}
+# Define pigment and anion variables
+pigment_vars <- c("ChlA", "ChlB", "Astaxanthin", "Lutein", "BetaC", "Pheophorbide", "Pheophytin")
+anion_vars <- c("Cl", "NO2NO3", "SO42", "PO43", "Fo")
+
+# Filter to just the necessary columns & regions
+df_filtered <- dfAnion %>%
+  filter(Color == "red") %>% 
+  select(APLoc, all_of(pigment_vars), all_of(anion_vars)) %>%
+  filter(APLoc %in% c("North", "South")) %>%
+  na.omit()
+
+# Function to compute pigment–anion Spearman correlations per region
+get_pigment_anion_corr <- function(data, aploc_name) {
+  cor_matrix <- rcorr(as.matrix(data[, -1]), type = "spearman")
+
+  r_vals <- cor_matrix$r
+  p_vals <- cor_matrix$P
+
+  # Create all pigment–anion pair combinations
+  pairs <- expand.grid(Pigment = pigment_vars, Anion = anion_vars, stringsAsFactors = FALSE)
+
+  results <- pairs %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[Anion, Pigment],
+      p_value = p_vals[Anion, Pigment],
+      significant = p_value < 0.05,
+      label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+      APLoc = aploc_name
+    ) %>%
+    ungroup()
+
+  return(results)
+}
+
+# Compute correlations for each APLoc region
+cor_results <- df_filtered %>%
+  group_split(APLoc) %>%
+  map_dfr(~get_pigment_anion_corr(.x, unique(.x$APLoc)))
+
+# Convert to factors to preserve axis order
+cor_results$Pigment <- factor(cor_results$Pigment, levels = pigment_vars)
+cor_results$Anion <- factor(cor_results$Anion, levels = anion_vars)
+
+# Plot
+heatmapPigAnion_Red <- ggplot(cor_results, aes(x = Pigment, y = Anion, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = filter(cor_results, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  facet_wrap(~APLoc, ncol = 1) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0, name = "Spearman r") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  )
+
+heatmapPigAnion_Red
+
+ggsave(heatmapPigAnion_Red, filename = "heatmapPigAnion_Red.png", width = 7, height = 9, bg = "white")
+```
+
+## North and South Regions (Green Samples)
+```{r}
+# Define pigment and anion variables
+pigment_vars <- c("ChlA", "ChlB", "Astaxanthin", "Lutein", "BetaC", "Pheophorbide", "Pheophytin")
+anion_vars <- c("Cl", "NO2NO3", "SO42", "PO43", "Fo")
+
+# Filter to just the necessary columns & regions
+df_filtered <- dfAnion %>%
+  filter(Color == "green") %>% 
+  select(APLoc, all_of(pigment_vars), all_of(anion_vars)) %>%
+  filter(APLoc %in% c("North", "South")) %>%
+  na.omit()
+
+# Function to compute pigment–anion Spearman correlations per region
+get_pigment_anion_corr <- function(data, aploc_name) {
+  cor_matrix <- rcorr(as.matrix(data[, -1]), type = "spearman")
+
+  r_vals <- cor_matrix$r
+  p_vals <- cor_matrix$P
+
+  # Create all pigment–anion pair combinations
+  pairs <- expand.grid(Pigment = pigment_vars, Anion = anion_vars, stringsAsFactors = FALSE)
+
+  results <- pairs %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[Anion, Pigment],
+      p_value = p_vals[Anion, Pigment],
+      significant = p_value < 0.05,
+      label = paste0(round(Spearman_r, 2), "\n(p=", round(p_value, 3), ")"),
+      APLoc = aploc_name
+    ) %>%
+    ungroup()
+
+  return(results)
+}
+
+# Compute correlations for each APLoc region
+cor_results <- df_filtered %>%
+  group_split(APLoc) %>%
+  map_dfr(~get_pigment_anion_corr(.x, unique(.x$APLoc)))
+
+# Convert to factors to preserve axis order
+cor_results$Pigment <- factor(cor_results$Pigment, levels = pigment_vars)
+cor_results$Anion <- factor(cor_results$Anion, levels = anion_vars)
+
+# Plot
+heatmapPigAnion_Green <- ggplot(cor_results, aes(x = Pigment, y = Anion, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = filter(cor_results, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  facet_wrap(~APLoc, ncol = 1) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0, name = "Spearman r") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  )
+
+heatmapPigAnion_Green
+
+ggsave(heatmapPigAnion_Green, filename = "heatmapPigAnion_Green.png", width = 7, height = 9, bg = "white")
+```

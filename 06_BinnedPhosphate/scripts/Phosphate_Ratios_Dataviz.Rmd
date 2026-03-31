@@ -1,0 +1,2088 @@
+---
+title: "Binned Phosphate, N:P Ratio, and Pigment Ratios - Red & Green Algae Comparison"
+author: "Ellie Ryan"
+date: "`r Sys.Date()`"
+output:
+   html_document:
+    theme: flatly
+    highlight: zenburn
+    toc: true
+    toc_float: true
+    toc_collapsed: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Created:** 2/17/2026
+
+**Last Modified:** 2/23/2026
+
+```{r, message=FALSE, warning=FALSE}
+# Load packages
+library(tidyverse)
+library(lubridate)
+library(FSA)
+library(purrr)
+library(kableExtra)
+library(Hmisc)
+```
+
+```{r}
+regionPal <- c(
+  "North" = "#284C46FF",
+  "South" = "#b04a25"
+) 
+
+colorPal <- c(
+  "clean" = "#95879f",
+  "red" = "#b04a25",
+  "green" = "#647d6a"
+)
+
+algaePal <- c(
+  "clean" = "#a5bdc0",
+  "algae" = "#735a69"
+)
+
+pigPal <- c(
+  "Astaxanthin" = "#b04a25",
+  "Lutein" = "#d9983b",
+  "ChlA" = "#284C46FF",
+  "ChlB" = "#647d6a",
+  "BetaC" = "#4d1d05",
+  "Pheophorbide" = "#414c66", 
+  "Pheophytin" = "#95879f"
+)
+
+plot_theme <- theme(
+  axis.title = element_text(size = 12, face = "bold"), # Axis labels: 12 pt, bold
+  axis.text = element_text(size = 12), # Axis text: 12 pt
+  axis.line = element_line(linewidth = 0.5),  # Thicker axis line
+  legend.position = "top", # Position legend at the top
+  legend.justification = c(0, 1), # Justify legend to top-left
+  legend.text = element_text(size = 12), # Legend text: 12 pt
+  legend.title = element_text(size = 12), 
+  plot.title = element_text(size = 14, face = "bold"),  # Adjust plot title size
+  plot.subtitle = element_text(size = 13, face = "italic"), 
+  plot.margin = margin(20, 20, 20, 20)
+)
+
+plot_themePub <- theme(
+  text = element_text(family = "Helvetica"),
+  axis.title.x = element_text(size = 10, margin = margin(t = 2)),  # t = top margin
+  axis.title.y = element_text(size = 10, margin = margin(r = 4)),  # r = right margin
+  axis.text = element_text(size = 10),
+  axis.line = element_blank(),
+  axis.ticks.x = element_blank(),
+  axis.ticks.y = element_line(color = "black", linewidth = 0.25),  # Add tick marks
+  axis.ticks.length = unit(-0.15, "cm"),  # Length of tick marks
+  panel.grid = element_blank(),
+  panel.background = element_blank(),
+  panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
+  legend.position = "top",
+  legend.justification = c(0, 1),
+  legend.text = element_text(size = 10),
+  legend.title = element_text(size = 10),
+  plot.title = element_text(size = 14, face = "bold"),
+  plot.subtitle = element_text(size = 13, face = "italic"),
+  plot.margin = margin(3, 3, 3, 3)
+)
+
+plot_theme2 <- theme(
+  axis.title = element_text(size = 12, face = "bold"), # Axis labels: 12 pt, bold
+  axis.text = element_text(size = 12), # Axis text: 12 pt
+  axis.line = element_line(linewidth = 0.5),  # Thicker axis line
+  legend.position = "top", # Position legend at the top
+  legend.justification = c(0, 1), # Justify legend to top-left
+  legend.text = element_text(size = 12), # Legend text: 12 pt
+  legend.title = element_text(size = 12), 
+  plot.title = element_text(size = 14, face = "bold"),  # Adjust plot title size
+  plot.subtitle = element_text(size = 13, face = "italic"), 
+  axis.text.x = element_text(angle = 45, hjust = 1), 
+  plot.margin = margin(20, 20, 20, 20)
+)
+
+pairsplot_theme <- theme(
+  text = element_text(size = 10),  # Adjust variable name text size
+  axis.text = element_text(size = 8),  # Adjust axis text size
+  plot.title = element_text(size = 12, face = "bold"),  # Adjust plot title size
+  legend.text = element_text(size = 12))  # Adjust legend text size
+```
+
+# Overview
+
+The purpose of this `.Rmd` is to bin PO43 concentrations into high and low categories and use Kruskal-Wallis and Dunn's post-hoc testing to determine whether algal properties differed in red and green snow colors at high versus low PO43 concentrations. Before proceeding, I will clean the dataset so that it features only the variables I am interested in for this analysis. In this dataset, 108 samples are used from the Antarctic Peninsula, following the removal of 5 outliers. These observations are broken down by `Color`, or the apparent snow color at time of sample collection. To keep things simple, there are only three levels to the `Color` category: red, green and clean. The breakdown of samples collected in the WAP is as follows:
+
+-   Antarctic Peninsula:
+    -   107 samples
+        -   43 red
+        -   46 green
+        -   18 clean
+
+*NOTE: Fewer samples were used for analysis, since there are NA values for pigment concentrations of some samples.*
+
+From anion outlier analysis, the following outliers were identified for removal:
+
+-   2025-02-19-SI-algae3
+-   2025-02-24-DA-algae2
+-   2025-02-24-DA-algae6
+-   2025-03-07-NH-algae3
+-   2025-01-12-PI-algae10
+
+See the Thesis Figures (Preliminary) doc for justification for removal of each. Likely, more samples will be removed following visualization of pigment distribution.
+
+## Data Wrangling
+
+```{r}
+df <- read.csv("CompiledDataPI.csv")
+str(df)
+```
+
+Adding an `Algae` column to classify samples as algae or clean snow samples and a `Region` column to separate North and South samples.
+
+```{r}
+# Format date column 
+df <- df %>%
+  mutate(
+    Date = as.Date(Date, format = "%m/%d/%y"))
+
+# Add Algae
+df <- df %>%  
+  mutate(Algae = case_when(
+    Color %in% c("red", "green") ~ "algae",
+    Color == "clean" ~ 'clean'
+  )) %>% 
+  relocate(Algae, .after = Color)
+
+# Add Region
+df <- df %>% 
+  mutate(
+  Region = if_else(
+    Site %in% c("Horseshoe Island", "Stonington Island"),
+    "South",
+    "North")) %>% 
+  relocate(Region, .after = Site)
+
+# Add LocAbbrev
+df <- df %>% mutate(LocAbbrev = case_when(
+  Location == "Antarctic Peninsula" ~ paste("WAP")
+)) %>%  
+  relocate(LocAbbrev, .after = Site)
+
+# Convert anion concentrations to µM
+df <- df %>% 
+  mutate(Fo = 22.21*Fo,
+         Cl = 28.21*Cl,
+         NO2 = 21.73*NO2,
+         NO3 = 16.13*NO3, 
+         PO43 = 10.53*PO43, 
+         SO42 = 10.41*SO42)
+
+# Combine NO2 & NO3
+df <- df %>% 
+  mutate(NO2NO3 = NO2 + NO3) %>% 
+  relocate(NO2NO3, .after = NO3)
+
+```
+
+```{r}
+str(df)
+```
+
+```{r}
+outliers <- c(
+  "2025-02-19-SI-algae3",
+  "2025-02-24-DA-algae2",
+  "2025-02-24-DA-algae6",
+  "2025-03-07-NH-algae3",
+  "2025-01-12-PI-algae10")
+
+df <- df %>% 
+  filter(!SampleID %in% outliers)
+```
+
+### Pigments & Anions
+
+```{r}
+dfBulk <- df %>% 
+  select(c("SampleID", "Date", "Location", "Site", "Region", "LocAbbrev", "Color", "Algae", Astaxanthin:Pheophytin, PO43, NO2NO3)) %>% 
+  mutate(Algae = case_when(
+    Color %in% c("red", "green") ~ "algae",
+    Color == "clean" ~ 'clean'
+  )) %>% 
+  relocate(Algae, .after = Color) %>% 
+  na.omit(dfBulk)
+
+outliersAnion <- c("2025-02-24-DA-algae1")
+
+dfBulk <- dfBulk %>% 
+  filter(!SampleID %in% outliersAnion)
+
+# Add BetaC:Astax Ratio
+dfBulk <- dfBulk %>% 
+  mutate(BetaC_Astax_Ratio = ifelse(Astaxanthin > 0, BetaC/Astaxanthin, NA_real_)) %>% 
+  relocate(BetaC_Astax_Ratio, .after = Pheophytin)
+
+# Add Chla:Chlb Ratio
+dfBulk <- dfBulk %>% 
+  mutate(ChlA_ChlB_Ratio = ifelse(ChlB > 0, ChlA/ChlB, NA_real_)) %>% 
+  relocate(ChlA_ChlB_Ratio, .after = BetaC_Astax_Ratio)
+
+# Add Chla:Astax Ratio
+dfBulk <- dfBulk %>% 
+  mutate(ChlA_Astax_Ratio = ifelse(Astaxanthin > 0, ChlA/Astaxanthin, NA_real_)) %>% 
+  relocate(ChlA_Astax_Ratio, .after = ChlA_ChlB_Ratio)
+
+# Create N:P Ratio
+dfBulk <- dfBulk %>% 
+  mutate(NP_Ratio = ifelse(PO43 > 0, NO2NO3/PO43, NA_real_)) 
+```
+
+### Pigment Ratios and Anions
+```{r}
+dfAnion_Ratio <- df %>% 
+  select(c("SampleID", "Date", "Location", "Site", "Region", "LocAbbrev", "Color", "Algae", ChlA, ChlB, BetaC, Astaxanthin, Fo:SO42)) %>% 
+  mutate(Algae = case_when(
+    Color %in% c("red", "green") ~ "algae",
+    Color == "clean" ~ 'clean'
+  )) %>% 
+  mutate(NO2NO3 = NO2 + NO3) %>% 
+  relocate(Algae, .after = Color) %>% 
+  relocate(NO2NO3, .after = Cl) %>% 
+  select(!NO2) %>% 
+  select(!NO3) %>% 
+  na.omit(dfAnion_Ratio)
+
+outliersAnion <- c("2025-02-24-DA-algae1")
+
+dfAnion_Ratio <- dfAnion_Ratio %>% 
+  filter(!SampleID %in% outliersAnion)
+
+# Add BetaC:Astax Ratio
+dfAnion_Ratio <- dfAnion_Ratio %>% 
+  mutate(BetaC_Astax_Ratio = ifelse(Astaxanthin > 0, BetaC/Astaxanthin, NA_real_)) %>% 
+  relocate(BetaC_Astax_Ratio, .after = Astaxanthin)
+
+# Add Chla:Chlb Ratio
+dfAnion_Ratio <- dfAnion_Ratio %>% 
+  mutate(ChlA_ChlB_Ratio = ifelse(ChlB > 0, ChlA/ChlB, NA_real_)) %>% 
+  relocate(ChlA_ChlB_Ratio, .after = BetaC_Astax_Ratio)
+
+# Add Chla:Astax Ratio
+dfAnion_Ratio <- dfAnion_Ratio %>% 
+  mutate(ChlA_Astax_Ratio = ifelse(Astaxanthin > 0, ChlA/Astaxanthin, NA_real_)) %>% 
+  relocate(ChlA_Astax_Ratio, .after = ChlA_ChlB_Ratio)
+
+```
+
+
+### Cell & Anion
+
+```{r}
+dfCell <- df %>% 
+  select(c("SampleID", "Date", "Location", "Site", "Region", "LocAbbrev", "Color", "Algae", "CellDensity", "CellLength", PO43, NO2NO3)) %>% 
+  na.omit(dfCell)
+
+dfCell <- dfCell %>% 
+  mutate(
+    # Calulate volume (µm^3)
+    CellVolume = (pi/6)*(CellLength^3)) %>% 
+  relocate(CellVolume, .after = CellLength) %>% 
+  select(!CellLength)
+
+# Create N:P Ratio
+dfCell <- dfCell %>% 
+  mutate(NP_Ratio = ifelse(PO43 > 0, NO2NO3/PO43, NA_real_)) 
+```
+
+### Normalized Pigment & Anions
+
+```{r}
+dfNorm <- df %>% 
+  mutate(ChlA = (ChlA/CellDensity)*1000,
+         ChlB = (ChlB/CellDensity)*1000,
+         Astaxanthin = (Astaxanthin/CellDensity)*1000,
+         Lutein = (Lutein/CellDensity)*1000,
+         BetaC = (BetaC/CellDensity)*1000,
+         Pheophytin = (Pheophytin/CellDensity)*1000,
+         Pheophorbide = (Pheophorbide/CellDensity)*1000) 
+
+dfNorm <- dfNorm %>% 
+  select(c("SampleID", "Date", "Location", "Site", "Region", "LocAbbrev", "Color", "Algae", Astaxanthin:Pheophytin, PO43, NO2NO3)) %>% 
+  mutate(Algae = case_when(
+    Color %in% c("red", "green") ~ "algae",
+    Color == "clean" ~ 'clean'
+  )) %>% 
+  relocate(Algae, .after = Color) %>% 
+  na.omit(dfNorm)
+
+# Create N:P Ratio
+dfNorm <- dfNorm %>% 
+  mutate(NP_Ratio = ifelse(PO43 > 0, NO2NO3/PO43, NA_real_)) 
+```
+
+### Bulk Pigments (Pivoted)
+
+```{r}
+dfBulk_long <- dfBulk %>% 
+  pivot_longer(cols = Astaxanthin:Pheophytin,
+               names_to = "Pigment",
+               values_to = "Concentration")
+
+dfBulk_longTable <- dfBulk %>% 
+    pivot_longer(cols = Astaxanthin:ChlA_Astax_Ratio,
+               names_to = "Pigment",
+               values_to = "Concentration")
+```
+
+### Bulk Ratios (Pivoted)
+
+```{r}
+dfBulkRatio_long <- dfBulk %>% 
+  pivot_longer(cols = BetaC_Astax_Ratio:ChlA_Astax_Ratio,
+               names_to = "Pigments",
+               values_to = "Ratio")
+```
+
+### Normalized Pigments (Pivoted)
+
+```{r}
+dfNorm_long <- dfNorm %>% 
+  pivot_longer(cols = Astaxanthin:Pheophytin,
+               names_to = "Pigment",
+               values_to = "Concentration")
+```
+
+### Cell Density & Volume (Pivoted)
+
+```{r}
+dfCell_long <- dfCell %>% 
+  pivot_longer(cols = CellDensity:CellVolume,
+               names_to = "CellProperty",
+               values_to = "Value")
+```
+
+### Anions Dataset
+
+```{r}
+dfAnion <- df %>% 
+  select(c("SampleID", "Date", "Location", "Site", "LocAbbrev", "Color", "Algae", Fo:SO42)) %>% 
+  mutate(NO2NO3 = NO2 + NO3) %>% 
+  relocate(NO2NO3, .after = Cl) %>% 
+  select(!NO2) %>% 
+  select(!NO3) %>% 
+  na.omit(dfAnion)
+
+outliers <- c(
+  "2025-02-19-SI-algae3",
+  "2025-02-24-DA-algae2",
+  "2025-02-24-DA-algae6",
+  "2025-03-07-NH-algae3",
+  "2025-01-12-PI-algae10",
+  "2025-02-24-DA-algae1"
+  )
+
+dfAnion <- dfAnion %>% 
+  filter(!SampleID %in% outliers)
+
+# Add N:P Ratio
+dfAnion <- dfAnion %>% 
+  mutate(NP_Ratio = ifelse(PO43 > 0, NO2NO3 / PO43, NA_real_))
+
+```
+
+### Anions Dataset (Separate NO2, NO3)
+
+```{r}
+dfAnionN <- df %>% 
+  select(c("SampleID", "Date", "Location", "Site", "LocAbbrev", "Color", "Algae", Fo:SO42)) %>% 
+  na.omit(dfAnionN)
+
+dfAnionN <- dfAnionN %>% 
+  filter(!SampleID %in% outliers)
+
+```
+
+# Phosphate Binning
+
+In this section, I will: 
+
+1.  Bin samples into low or high phosphate classes based on the median PO43 concentration across all samples
+
+2.  Determine whether algal properties differ between low and high PO43 classes in red and green snow samples
+
+Keeping this as simple and straightforward as possible, I am going to bin PO43 into low and high classes based on the median (17.1865 µM), where values \< 17.1865 are classified as "low" and values ≤ 17.1865 are classified as "high." From the below histogram, it is evident that, while right-skewed, PO43 is unimodal, so a 50/50 split in this way makes sense.
+
+```{r}
+hist(dfAnion$PO43)
+median(dfAnion$PO43)
+```
+
+## Update Dataframes
+
+```{r}
+dfCell <- dfCell %>% 
+  mutate(PO43Class = if_else(
+    PO43 < 17.1865, 
+    "low",
+    "high")) %>% 
+  relocate(PO43Class, .after = Algae)
+```
+
+```{r}
+dfBulk <- dfBulk %>% 
+  mutate(PO43Class = if_else(
+    PO43 < 17.1865, 
+    "low",
+    "high")) %>% 
+  relocate(PO43Class, .after = Algae)
+```
+
+```{r}
+dfNorm <- dfNorm %>% 
+  mutate(PO43Class = if_else(
+    PO43 < 17.1865, 
+    "low",
+    "high")) %>% 
+  relocate(PO43Class, .after = Algae)
+```
+
+```{r}
+dfBulk_long <- dfBulk_long %>% 
+  mutate(PO43Class = if_else(
+    PO43 < 17.1865, 
+    "low",
+    "high")) %>% 
+  relocate(PO43Class, .after = Algae)
+```
+
+```{r}
+dfBulkRatio_long <- dfBulkRatio_long %>% 
+  mutate(PO43Class = if_else(
+    PO43 < 17.1865, 
+    "low",
+    "high")) %>% 
+  relocate(PO43Class, .after = Algae)
+```
+
+```{r}
+dfBulk_longTable <- dfBulk_longTable %>% 
+  mutate(PO43Class = if_else(
+    PO43 < 17.1865, 
+    "low",
+    "high")) %>% 
+  relocate(PO43Class, .after = Algae)
+```
+
+```{r}
+dfNorm_long <- dfNorm_long %>% 
+  mutate(PO43Class = if_else(
+    PO43 < 17.1865, 
+    "low",
+    "high")) %>% 
+  relocate(PO43Class, .after = Algae)
+```
+
+```{r}
+dfCell_long <- dfCell_long %>% 
+  mutate(PO43Class = if_else(
+    PO43 < 17.1865, 
+    "low",
+    "high")) %>% 
+  relocate(PO43Class, .after = Algae)
+```
+
+```{r}
+dfAnionN <- dfAnionN %>% 
+  mutate(PO43Class = if_else(
+    PO43 < 17.1865, 
+    "low",
+    "high")) %>% 
+  relocate(PO43Class, .after = Algae)
+```
+
+```{r}
+dfAnionN_long <- dfAnionN %>% 
+  pivot_longer(cols = c(Fo, Cl, SO42, PO43, NO2, NO3),
+               names_to = "Anion",
+               values_to = "Concentration")
+```
+
+```{r}
+dfAnion <- dfAnion %>% 
+  mutate(PO43Class = if_else(
+    PO43 < 17.1865, 
+    "low",
+    "high")) %>% 
+  relocate(PO43Class, .after = Algae)
+```
+
+```{r}
+dfAnion_long <- dfAnion %>% 
+  pivot_longer(cols = c(Fo, Cl, SO42, PO43, NO2NO3, NP_Ratio),
+               names_to = "Anion",
+               values_to = "Concentration")
+```
+
+## Basic Data Visualization
+
+As evidenced by the below plot, the majority of green samples fall into the 'high' PO43 class, while the majority of red and clean samples fall into the 'low' PO43 class.
+
+```{r}
+barplot_PO43Class <- ggplot(
+  dfBulk %>% filter(!is.na(PO43Class), !is.na(Color)),
+  aes(
+    x = PO43Class,
+    fill = factor(Color, levels = c("green", "red", "clean")))) +
+  geom_bar(position = position_dodge(width = 0.9)) +
+  geom_text(
+    stat = "count",
+    aes(label = after_stat(count)),
+    position = position_dodge(width = 0.9),
+    vjust = -0.3,
+    size = 3.5) +
+  scale_y_continuous(
+    expand = c(0, 0),
+    limits = c(0, 45)) +
+  scale_fill_manual(values = colorPal) +
+  labs(
+    x = expression(PO[4]^{"3-"}~"Class"),
+    y = "Number of Samples",
+    fill = "Snow Color") +
+  plot_themePub
+
+barplot_PO43Class
+
+ggsave(barplot_PO43Class, filename = "barplot_PO43Class.png", width = 5, height = 4.07, bg = "white")
+```
+
+## Kruskal-Wallis and Dunn's Post-Hoc Testing {.tabset}
+
+Now that the samples have been binned by high versus low PO43 concentration, I am going to use Kruskal-Wallis and Dunn's post-hoc tests to determine whether algal properties (cell density, cell volume, bulk pigment concentration, and per-cell pigment concentration) differed between high and low PO43 classes in red and green snow samples. I know from previous analyses that all involved variables do not follow the assumptions of normality and equal variance needed to run an ANOVA, so will proceed with nonparametric measures.
+
+### Bulk Pigment
+
+```{r}
+# Evaluate by snow color
+kruskalResultsBulk <- dfBulk_long %>%
+  group_by(Color, Pigment) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ PO43Class, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value),
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(PO43Class),
+                                data = .x,
+                                method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+
+# All samples
+kruskalResultsBulkAll <- dfBulk_long %>%
+  group_by(Pigment) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ PO43Class, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value),
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(PO43Class),
+                                data = .x,
+                                method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+```{r}
+# Evaluate by snow color
+dunnPairsBulk <- kruskalResultsBulk %>%
+  select(Color, Pigment, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+
+# All samples
+dunnPairsBulkAll <- kruskalResultsBulkAll %>%
+  select(Pigment, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    Color = "all",
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+
+# Merge
+dunnPairsBulkCombined <- bind_rows(
+  dunnPairsBulk,
+  dunnPairsBulkAll)
+```
+
+```{r}
+dunnPlotBulk <- ggplot(dunnPairsBulkCombined,
+                       aes(y = Comparison,
+                           x = Pigment,
+                           fill = P.adj)) +
+  geom_tile() +
+  
+  # black outline for significant results
+  geom_tile(data = filter(dunnPairsBulkCombined, significant),
+            color = "black",
+            linewidth = 0.75) +
+  
+  geom_text(aes(label = label), size = 3) +
+  
+  scale_fill_gradient(low = "tomato",
+                      high = "lightblue",
+                      name = "Adj. p-value") +
+  
+  facet_wrap(~ Color, ncol = 1) +   # <-- STACKED
+  
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    strip.text = element_text(face = "bold")
+  )
+
+dunnPlotBulk
+
+ggsave(dunnPlotBulk, filename = "dunnPlotBulk.png", width = 7, height = 6, bg = "white")
+```
+
+### Per-Cell Pigment
+
+```{r}
+# Evaluate by snow color
+kruskalResultsNorm <- dfNorm_long %>%
+  group_by(Color, Pigment) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ PO43Class, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value),
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(PO43Class),
+                                data = .x,
+                                method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+
+# All samples
+kruskalResultsNormAll <- dfNorm_long %>%
+  group_by(Pigment) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ PO43Class, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value),
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(PO43Class),
+                                data = .x,
+                                method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+```{r}
+# Evaluate by snow color
+dunnPairsNorm <- kruskalResultsNorm %>%
+  select(Color, Pigment, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+
+# All samples
+dunnPairsNormAll <- kruskalResultsNormAll %>%
+  select(Pigment, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    Color = "all",
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+
+# Merge
+dunnPairsNormCombined <- bind_rows(
+  dunnPairsNorm,
+  dunnPairsNormAll)
+```
+
+```{r}
+dunnPlotNorm <- ggplot(dunnPairsNormCombined,
+                       aes(y = Comparison,
+                           x = Pigment,
+                           fill = P.adj)) +
+  geom_tile() +
+  
+  # black outline for significant results
+  geom_tile(data = filter(dunnPairsNormCombined, significant),
+            color = "black",
+            linewidth = 0.75) +
+  
+  geom_text(aes(label = label), size = 3) +
+  
+  scale_fill_gradient(low = "tomato",
+                      high = "lightblue",
+                      name = "Adj. p-value") +
+  
+  facet_wrap(~ Color, ncol = 1) +   # <-- STACKED
+  
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    strip.text = element_text(face = "bold")
+  )
+
+dunnPlotNorm
+
+ggsave(dunnPlotNorm, filename = "dunnPlotNorm.png", width = 7, height = 6, bg = "white")
+```
+
+### Cell Density & Volume
+
+```{r}
+# Evaluate by snow color
+kruskalResultsCell <- dfCell_long %>%
+  group_by(Color, CellProperty) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Value ~ PO43Class, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value),
+    dunn = map(data, ~ dunnTest(Value ~ factor(PO43Class),
+                                data = .x,
+                                method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+
+# All samples
+kruskalResultsCellAll <- dfCell_long %>%
+  group_by(CellProperty) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Value ~ PO43Class, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value),
+    dunn = map(data, ~ dunnTest(Value ~ factor(PO43Class),
+                                data = .x,
+                                method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+```{r}
+# Evaluate by snow color
+dunnPairsCell <- kruskalResultsCell %>%
+  select(Color, CellProperty, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+
+# All samples
+dunnPairsCellAll <- kruskalResultsCellAll %>%
+  select(CellProperty, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    Color = "all",
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+
+# Merge
+dunnPairsCellCombined <- bind_rows(
+  dunnPairsCell,
+  dunnPairsCellAll)
+```
+
+```{r}
+dunnPlotCell <- ggplot(dunnPairsCellCombined,
+                       aes(y = Comparison,
+                           x = CellProperty,
+                           fill = P.adj)) +
+  geom_tile() +
+  
+  # black outline for significant results
+  geom_tile(data = filter(dunnPairsCellCombined, significant),
+            color = "black",
+            linewidth = 0.75) +
+  
+  geom_text(aes(label = label), size = 3) +
+  
+  scale_fill_gradient(low = "tomato",
+                      high = "lightblue",
+                      name = "Adj. p-value") +
+  
+  facet_wrap(~ Color, ncol = 1) +   # <-- STACKED
+  
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    strip.text = element_text(face = "bold")
+  )
+
+dunnPlotCell
+
+ggsave(dunnPlotCell, filename = "dunnPlotCell.png", width = 3.5, height = 6, bg = "white")
+```
+
+# Summary Tables {.tabset}
+
+Below are functions to format the number of significant figures and the median/IQR in-cell display.
+
+```{r}
+# Helper function: significant figures + commas + preserve .0 for integers
+fmt_sigfig <- function(x, sig = 4) {
+  # Round to significant figures
+  y <- signif(x, sig)
+  
+  # Convert to string with commas
+  out <- prettyNum(y, big.mark = ",", scientific = FALSE)
+  
+  # Add ".0" if number is an integer after rounding
+  out[grepl("^\\d+$", out)] <- paste0(out[grepl("^\\d+$", out)], ".0")
+  
+  return(out)
+}
+```
+
+```{r}
+format_median_iqr <- function(x) {
+  x <- x[!is.na(x)]
+  
+  med <- median(x)
+  q1  <- quantile(x, 0.25)
+  q3  <- quantile(x, 0.75)
+  
+  paste0(
+    fmt_sigfig(med), " (",
+    fmt_sigfig(q1), "–",
+    fmt_sigfig(q3), ")"
+  )
+}
+```
+
+## Bulk Pigments (ChlA:Astax & BetaC:Astax )
+
+```{r}
+# Pull median and IQR for all samples
+all_colorBulk <- dfBulk_longTable %>%
+  group_by(Pigment) %>%
+  summarise(
+    all_colorBulk = format_median_iqr(Concentration),
+    .groups = "drop"
+  )
+
+# Pull median and IQR for red, green, and clean samples
+color_summaryBulk <- dfBulk_longTable %>%
+  group_by(Pigment, Color) %>%
+  summarise(
+    summary = format_median_iqr(Concentration),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = Color,
+    values_from = summary
+  ) %>%
+  rename(
+    Red   = red,
+    Green = green,
+    Clean = clean
+  )
+
+# Merge
+color_tableBulk <- left_join(all_colorBulk, color_summaryBulk, by = "Pigment")
+```
+
+```{r}
+# Pull median and IQR for low and high PO43 classes (all samples)
+po_allBulk <- dfBulk_longTable %>%
+  filter(PO43Class %in% c("low", "high")) %>%
+  group_by(Pigment, PO43Class) %>%
+  summarise(
+    summary = format_median_iqr(Concentration),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = PO43Class,
+    values_from = summary,
+    names_prefix = "PO43_"
+  )
+
+# Pull median and IQR for low and high PO43 classes (by snow color)
+po_colorBulk <- dfBulk_longTable %>%
+  filter(PO43Class %in% c("low", "high"),
+         Color %in% c("red", "green")) %>%
+  group_by(Pigment, PO43Class, Color) %>%
+  summarise(
+    summary = format_median_iqr(Concentration),
+    .groups = "drop"
+  ) %>%
+  unite(col_name, PO43Class, Color) %>%
+  pivot_wider(
+    names_from = col_name,
+    values_from = summary
+  )
+```
+
+```{r}
+# Merge into final table 
+summaryTableBulk <- color_tableBulk %>%
+  left_join(po_allBulk, by = "Pigment") %>%
+  left_join(po_colorBulk, by = "Pigment") %>%
+  rename(
+    "All" = all_colorBulk,
+    "Red" = Red,
+    "Green" = Green,
+    "Clean" = Clean,
+    "Low PO43 (All)" = PO43_low,
+    "Low PO43 (Red)" = low_red,
+    "Low PO43 (Green)" = low_green,
+    "High PO43 (All)" = PO43_high,
+    "High PO43 (Red)" = high_red,
+    "High PO43 (Green)" = high_green
+  )
+
+# Format table with KableExtra
+summaryTableBulk %>% 
+  kable("html", caption = "Bulk Pigment Concentration (ppb): Median (Q1-Q3)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+## Per-Cell Pigments
+
+```{r}
+# Pull median and IQR for all samples
+all_colorNorm <- dfNorm_long %>%
+  group_by(Pigment) %>%
+  summarise(
+    all_colorNorm = format_median_iqr(Concentration),
+    .groups = "drop"
+  )
+
+# Pull median and IQR for red, green, and clean samples
+color_summaryNorm <- dfNorm_long %>%
+  group_by(Pigment, Color) %>%
+  summarise(
+    summary = format_median_iqr(Concentration),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = Color,
+    values_from = summary
+  ) %>%
+  rename(
+    Red   = red,
+    Green = green,
+    Clean = clean
+  )
+
+# Merge
+color_tableNorm <- left_join(all_colorNorm, color_summaryNorm, by = "Pigment")
+```
+
+```{r}
+# Pull median and IQR for low and high PO43 classes (all samples)
+po_allNorm <- dfNorm_long %>%
+  filter(PO43Class %in% c("low", "high")) %>%
+  group_by(Pigment, PO43Class) %>%
+  summarise(
+    summary = format_median_iqr(Concentration),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = PO43Class,
+    values_from = summary,
+    names_prefix = "PO43_"
+  )
+
+# Pull median and IQR for low and high PO43 classes (by snow color)
+po_colorNorm <- dfNorm_long %>%
+  filter(PO43Class %in% c("low", "high"),
+         Color %in% c("red", "green")) %>%
+  group_by(Pigment, PO43Class, Color) %>%
+  summarise(
+    summary = format_median_iqr(Concentration),
+    .groups = "drop"
+  ) %>%
+  unite(col_name, PO43Class, Color) %>%
+  pivot_wider(
+    names_from = col_name,
+    values_from = summary
+  )
+```
+
+```{r}
+# Merge into final table 
+summaryTableNorm <- color_tableNorm %>%
+  left_join(po_allNorm, by = "Pigment") %>%
+  left_join(po_colorNorm, by = "Pigment") %>%
+  rename(
+    "All" = all_colorNorm,
+    "Red" = Red,
+    "Green" = Green,
+    "Clean" = Clean,
+    "Low PO43 (All)" = PO43_low,
+    "Low PO43 (Red)" = low_red,
+    "Low PO43 (Green)" = low_green,
+    "High PO43 (All)" = PO43_high,
+    "High PO43 (Red)" = high_red,
+    "High PO43 (Green)" = high_green
+  )
+
+# Format table with KableExtra
+summaryTableNorm %>% 
+  kable("html", caption = "Per-Cell Pigment Concentration (ng/cell): Median (Q1-Q3)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+## Cell Density and Cell Volume
+
+```{r}
+format_median_iqr_sci <- function(x, sig = 3) {
+  med <- median(x, na.rm = TRUE)
+  q1  <- quantile(x, 0.25, na.rm = TRUE)
+  q3  <- quantile(x, 0.75, na.rm = TRUE)
+  
+  med_f <- format(signif(med, sig), scientific = TRUE)
+  q1_f  <- format(signif(q1,  sig), scientific = TRUE)
+  q3_f  <- format(signif(q3,  sig), scientific = TRUE)
+  
+  paste0(med_f, " (", q1_f, "–", q3_f, ")")
+}
+```
+
+```{r}
+# Pull median and IQR for all samples
+all_colorCell <- dfCell_long %>%
+  group_by(CellProperty) %>%
+  summarise(
+    all_colorCell = format_median_iqr_sci(Value),
+    .groups = "drop"
+  )
+
+# Pull median and IQR for red, green, and clean samples
+color_summaryCell <- dfCell_long %>%
+  group_by(CellProperty, Color) %>%
+  summarise(
+    summary = format_median_iqr_sci(Value),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = Color,
+    values_from = summary
+  ) %>%
+  rename(
+    Red   = red,
+    Green = green,
+    Clean = clean
+  )
+
+# Merge
+color_tableCell <- left_join(all_colorCell, color_summaryCell, by = "CellProperty")
+```
+
+```{r}
+# Pull median and IQR for low and high PO43 classes (all samples)
+po_allCell <- dfCell_long %>%
+  filter(PO43Class %in% c("low", "high")) %>%
+  group_by(CellProperty, PO43Class) %>%
+  summarise(
+    summary = format_median_iqr_sci(Value),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = PO43Class,
+    values_from = summary,
+    names_prefix = "PO43_"
+  )
+
+# Pull median and IQR for low and high PO43 classes (by snow color)
+po_colorCell <- dfCell_long %>%
+  filter(PO43Class %in% c("low", "high"),
+         Color %in% c("red", "green")) %>%
+  group_by(CellProperty, PO43Class, Color) %>%
+  summarise(
+    summary = format_median_iqr_sci(Value),
+    .groups = "drop"
+  ) %>%
+  unite(col_name, PO43Class, Color) %>%
+  pivot_wider(
+    names_from = col_name,
+    values_from = summary
+  )
+```
+
+```{r}
+# Merge into final table 
+summaryTableCell <- color_tableCell %>%
+  left_join(po_allCell, by = "CellProperty") %>%
+  left_join(po_colorCell, by = "CellProperty") %>%
+  rename(
+    "All" = all_colorCell,
+    "Red" = Red,
+    "Green" = Green,
+    "Clean" = Clean,
+    "Low PO43 (All)" = PO43_low,
+    "Low PO43 (Red)" = low_red,
+    "Low PO43 (Green)" = low_green,
+    "High PO43 (All)" = PO43_high,
+    "High PO43 (Red)" = high_red,
+    "High PO43 (Green)" = high_green
+  )
+
+# Format table with KableExtra
+summaryTableCell %>% 
+  kable("html", caption = "Cell Volume (µM^3) and Cell Density (cells/mL): Median (Q1-Q3)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+## Anions (Separate NO2 & NO3)
+
+```{r}
+# Pull median and IQR for all samples
+all_colorAnionN <- dfAnionN_long %>%
+  group_by(Anion) %>%
+  summarise(
+    all_colorAnionN = format_median_iqr(Concentration),
+    .groups = "drop"
+  )
+
+# Pull median and IQR for red, green, and clean samples
+color_summaryAnionN <- dfAnionN_long %>%
+  group_by(Anion, Color) %>%
+  summarise(
+    summary = format_median_iqr(Concentration),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = Color,
+    values_from = summary
+  ) %>%
+  rename(
+    Red   = red,
+    Green = green,
+    Clean = clean
+  )
+
+# Merge
+color_tableAnionN <- left_join(all_colorAnionN, color_summaryAnionN, by = "Anion")
+```
+
+```{r}
+# Pull median and IQR for low and high PO43 classes (all samples)
+po_allAnionN <- dfAnionN_long %>%
+  filter(PO43Class %in% c("low", "high")) %>%
+  group_by(Anion, PO43Class) %>%
+  summarise(
+    summary = format_median_iqr(Concentration),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = PO43Class,
+    values_from = summary,
+    names_prefix = "PO43_"
+  )
+
+# Pull median and IQR for low and high PO43 classes (by snow color)
+po_colorAnionN <- dfAnionN_long %>%
+  filter(PO43Class %in% c("low", "high"),
+         Color %in% c("red", "green")) %>%
+  group_by(Anion, PO43Class, Color) %>%
+  summarise(
+    summary = format_median_iqr(Concentration),
+    .groups = "drop"
+  ) %>%
+  unite(col_name, PO43Class, Color) %>%
+  pivot_wider(
+    names_from = col_name,
+    values_from = summary
+  )
+```
+
+```{r}
+# Merge into final table 
+summaryTableAnionN <- color_tableAnionN %>%
+  left_join(po_allAnionN, by = "Anion") %>%
+  left_join(po_colorAnionN, by = "Anion") %>%
+  rename(
+    "All" = all_colorAnionN,
+    "Red" = Red,
+    "Green" = Green,
+    "Clean" = Clean,
+    "Low PO43 (All)" = PO43_low,
+    "Low PO43 (Red)" = low_red,
+    "Low PO43 (Green)" = low_green,
+    "High PO43 (All)" = PO43_high,
+    "High PO43 (Red)" = high_red,
+    "High PO43 (Green)" = high_green
+  )
+
+# Format table with KableExtra
+summaryTableAnionN %>% 
+  kable("html", caption = "Anion Concentration (µM): Median (Q1-Q3)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+## Anions (Combined NO2 & NO3, N:P)
+
+```{r}
+# Pull median and IQR for all samples
+all_colorAnion <- dfAnion_long %>%
+  group_by(Anion) %>%
+  summarise(
+    all_colorAnion = format_median_iqr(Concentration),
+    .groups = "drop"
+  )
+
+# Pull median and IQR for red, green, and clean samples
+color_summaryAnion <- dfAnion_long %>%
+  group_by(Anion, Color) %>%
+  summarise(
+    summary = format_median_iqr(Concentration),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = Color,
+    values_from = summary
+  ) %>%
+  rename(
+    Red   = red,
+    Green = green,
+    Clean = clean
+  )
+
+# Merge
+color_tableAnion <- left_join(all_colorAnion, color_summaryAnion, by = "Anion")
+```
+
+```{r}
+# Pull median and IQR for low and high PO43 classes (all samples)
+po_allAnion <- dfAnion_long %>%
+  filter(PO43Class %in% c("low", "high")) %>%
+  group_by(Anion, PO43Class) %>%
+  summarise(
+    summary = format_median_iqr(Concentration),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = PO43Class,
+    values_from = summary,
+    names_prefix = "PO43_"
+  )
+
+# Pull median and IQR for low and high PO43 classes (by snow color)
+po_colorAnion <- dfAnion_long %>%
+  filter(PO43Class %in% c("low", "high"),
+         Color %in% c("red", "green")) %>%
+  group_by(Anion, PO43Class, Color) %>%
+  summarise(
+    summary = format_median_iqr(Concentration),
+    .groups = "drop"
+  ) %>%
+  unite(col_name, PO43Class, Color) %>%
+  pivot_wider(
+    names_from = col_name,
+    values_from = summary
+  )
+```
+
+```{r}
+# Merge into final table 
+summaryTableAnion <- color_tableAnion %>%
+  left_join(po_allAnion, by = "Anion") %>%
+  left_join(po_colorAnion, by = "Anion") %>%
+  rename(
+    "All" = all_colorAnion,
+    "Red" = Red,
+    "Green" = Green,
+    "Clean" = Clean,
+    "Low PO43 (All)" = PO43_low,
+    "Low PO43 (Red)" = low_red,
+    "Low PO43 (Green)" = low_green,
+    "High PO43 (All)" = PO43_high,
+    "High PO43 (Red)" = high_red,
+    "High PO43 (Green)" = high_green
+  )
+
+# Format table with KableExtra
+summaryTableAnion %>% 
+  kable("html", caption = "Anion Concentration (µM): Median (Q1-Q3)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+
+# Pigment Ratios 
+
+In this section, I will:
+
+1.  Compare pigment ratios between red and green snow (chla:chlb, chla:astax, betaC:astax) using Kruskal-Wallis and Dunn's post-hoc tests to determine whether ratios differ significantly between snow colors
+
+2.  Assess correlations among pigment ratios
+
+## Kruskal-Wallis and Dunn's Post-Hoc Testing 
+
+Below, I use the Kruskal-Wallis test to run a non-parametric comparison of each pigment ratio across each snow color. Then, I follow up with a Dunn's post hoc test for the ratios that show significant differences between the snow colors. Based on the heatmap, there appear to be no significant differences in the ChlA:ChlB ratio between snow colors. Both the ChlA:Astax and the BetaC:Astax ratios are significantly different between green and red samples. From the summary tables above, both the ChlA:Astax and BetaC:Astax ratios are significantly higher in green samples compared to red. 
+
+```{r}
+# Run kruskal wallis test 
+KruskalResultsRatio <- dfBulkRatio_long %>%
+  na.omit(dfBulkRatio_long) %>% 
+  group_by(Pigments) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Ratio ~ Color, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value)
+  )
+
+# Run Dunn's test 
+KruskalResultsRatio <- KruskalResultsRatio %>%
+  mutate(
+    dunn = map(data, ~ dunnTest(Ratio ~ factor(Color), data = .x, method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+#### Visualize Results
+
+```{r}
+dunnPairsRatio <- KruskalResultsRatio %>%
+  select(Pigments, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlot_Ratio <- ggplot(dunnPairsRatio, aes(x = Comparison, y = Pigments, fill = P.adj)) +
+  geom_tile() +
+  geom_tile(data = filter(dunnPairsRatio, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) 
+
+dunnPlot_Ratio
+
+ggsave(dunnPlot_Ratio, filename = "dunnPlot_Ratio.png", width = 7, height = 6, bg = "white")
+```
+
+## Pigment Ratio Correlations
+Below is a heat map showing the Spearman's correlation coefficient and associated p-value for pigment ratios. 
+
+```{r}
+# Define pigment variables
+pigment_vars <- c("ChlA_Astax_Ratio", "ChlA_ChlB_Ratio", "BetaC_Astax_Ratio")
+
+# Correlation function
+get_pigment_corr <- function(data, group_name) {
+
+  cor_mat <- rcorr(as.matrix(data), type = "spearman")
+
+  r_vals <- cor_mat$r
+  p_vals <- cor_mat$P
+
+  # Convert matrix to long format
+  expand.grid(
+    Pigment_X = pigment_vars,
+    Pigment_Y = pigment_vars,
+    stringsAsFactors = FALSE
+  ) %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[Pigment_Y, Pigment_X],
+      p_value    = p_vals[Pigment_Y, Pigment_X],
+      significant = p_value < 0.05,
+      label = paste0(
+        round(Spearman_r, 2),
+        "\n(p=", round(p_value, 3), ")"
+      ),
+      Group = group_name
+    ) %>%
+    ungroup()
+}
+
+cor_color <- dfAnion_Ratio %>%
+  filter(Color %in% c("red", "green")) %>%
+  select(Color, all_of(pigment_vars)) %>%
+  drop_na() %>%
+  group_split(Color) %>%
+  map_dfr(~get_pigment_corr(
+    data = .x %>% select(-Color),
+    group_name = unique(.x$Color)
+  ))
+
+cor_algae <- dfAnion_Ratio %>%
+  filter(Algae == "algae") %>%
+  select(all_of(pigment_vars)) %>%
+  drop_na() %>%
+  get_pigment_corr("algae")
+
+cor_all <- dfAnion_Ratio %>%
+  select(all_of(pigment_vars)) %>%
+  drop_na() %>%
+  get_pigment_corr("all")
+
+cor_results_all <- bind_rows(cor_color, cor_algae, cor_all)
+
+# Set factor levels FIRST
+cor_results_all <- cor_results_all %>%
+  mutate(
+    Pigment_X = factor(Pigment_X, levels = pigment_vars),
+    Pigment_Y = factor(Pigment_Y, levels = pigment_vars)
+  ) %>%
+  # Remove diagonal
+  filter(Pigment_X != Pigment_Y) %>%
+  # Keep lower triangle only
+  filter(as.numeric(Pigment_X) > as.numeric(Pigment_Y)) %>%
+  mutate(
+    Group = factor(Group, levels = c("red", "green", "algae", "all"))
+  )
+
+
+heatmapPigRatio <- ggplot(
+  cor_results_all,
+  aes(x = Pigment_X, y = Pigment_Y, fill = Spearman_r)
+) +
+  geom_tile() +
+  geom_tile(
+    data = filter(cor_results_all, significant),
+    color = "black",
+    linewidth = 0.75
+  ) +
+  geom_text(aes(label = label), size = 3) +
+  facet_wrap(~Group, ncol = 1) +
+  scale_fill_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    name = "Spearman r"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  )
+
+heatmapPigRatio
+```
+
+# Pigment Ratio-Anion Correlations 
+
+In this section, I will:
+
+1.  Assess correlations between anion concentrations and pigment ratios
+
+2.  Further evaluate unexpected negative correlations between ChlA:Astax and PO43 concentration
+
+## Heatmap - Pigment Ratios & Anions
+
+Below is a heatmap of Spearman's correlation values and p-values assessing the correlation between pigment ratios and anion concentration. It is interesting that correlations between PO43 and both ChlA:Astax and BetaC:Astax are moderately to strongly negative in green samples. 
+
+```{r, fig.width=9, fig.height=10}
+# Define pigment and anion variables
+pigment_vars <- c("ChlA_Astax_Ratio", "ChlA_ChlB_Ratio", "BetaC_Astax_Ratio")
+anion_vars <- c("Cl", "NO2NO3", "SO42", "PO43", "Fo")
+
+# Correlation function
+get_pigment_anion_corr <- function(data, group_name) {
+
+  cor_mat <- rcorr(as.matrix(data), type = "spearman")
+
+  r_vals <- cor_mat$r
+  p_vals <- cor_mat$P
+
+  expand.grid(
+    Pigment = pigment_vars,
+    Anion   = anion_vars,
+    stringsAsFactors = FALSE
+  ) %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[Anion, Pigment],
+      p_value    = p_vals[Anion, Pigment],
+      significant = p_value < 0.05,
+      label = paste0(
+        round(Spearman_r, 2),
+        "\n(p=", round(p_value, 3), ")"
+      ),
+      Group = group_name
+    ) %>%
+    ungroup()
+}
+
+# Red & Green (separate) 
+cor_color <- dfAnion_Ratio %>%
+  filter(Color %in% c("red", "green")) %>%
+  select(Color, Algae, all_of(pigment_vars), all_of(anion_vars)) %>%
+  na.omit() %>%
+  group_split(Color) %>%
+  map_dfr(~get_pigment_anion_corr(
+    data = .x %>% select(-Color, -Algae),
+    group_name = unique(.x$Color)
+  ))
+
+# Algae (red + green pooled)
+cor_algae <- dfAnion_Ratio %>%
+  filter(Algae == "algae") %>%
+  select(all_of(pigment_vars), all_of(anion_vars)) %>%
+  na.omit() %>%
+  get_pigment_anion_corr("algae")
+
+# All samples (red + green + clean) 
+cor_all <- dfAnion_Ratio %>%
+  select(all_of(pigment_vars), all_of(anion_vars)) %>%
+  na.omit() %>%
+  get_pigment_anion_corr("all")
+
+# Combine 
+cor_results_all <- bind_rows(cor_color, cor_algae, cor_all)
+
+# Factor ordering
+cor_results_all$Pigment <- factor(cor_results_all$Pigment, levels = pigment_vars)
+cor_results_all$Anion   <- factor(cor_results_all$Anion, levels = anion_vars)
+cor_results_all$Group   <- factor(
+  cor_results_all$Group,
+  levels = c("red", "green", "algae", "all")
+)
+
+# Plot 
+heatmapPigRatioAnion <- ggplot(
+  cor_results_all,
+  aes(x = Pigment, y = Anion, fill = Spearman_r)
+) +
+  geom_tile() +
+  geom_tile(
+    data = filter(cor_results_all, significant),
+    color = "black",
+    linewidth = 0.75
+  ) +
+  geom_text(aes(label = label), size = 3) +
+  facet_wrap(~Group, ncol = 1) +
+  scale_fill_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    name = "Spearman r"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  )
+
+heatmapPigRatioAnion
+
+# Save 
+ggsave(
+  heatmapPigRatioAnion,
+  filename = "heatmapPigRatioAnion.png",
+  width = 7,
+  height = 9,
+  bg = "white"
+)
+```
+
+## Investigate PO43 & ChlA:Astax Relationship
+
+From the plot below, it looks like there is an inverse, 1/x relationship between ChlA:Astax and PO43 for green samples. However, there are also a lot of extreme outliers at low PO43 concentrations.
+
+```{r}
+dfAnion_Ratio %>% 
+  filter(Color == "green") %>% 
+  ggplot() + 
+  geom_point(aes(x = PO43, y = ChlA_Astax_Ratio))
+```
+
+Looking explicitly at the correlation between PO43 and the ChlA:Astax ratio: 
+
+```{r}
+# All samples
+dfAnion_Ratio %>%
+  filter(Color == "green") %>%
+  filter(!is.na(PO43) & !is.na(ChlA_Astax_Ratio)) %>%
+  summarise(
+    rho = cor(PO43, ChlA_Astax_Ratio, method = "spearman"),
+    p   = cor.test(PO43, ChlA_Astax_Ratio, method = "spearman")$p.value
+  )
+
+# Remove extreme ratios (chla:astax > 200)
+dfAnion_Ratio %>%
+  filter(Color == "green", ChlA_Astax_Ratio < 200) %>%
+  filter(!is.na(PO43) & !is.na(ChlA_Astax_Ratio)) %>%
+  summarise(
+    rho = cor(PO43, ChlA_Astax_Ratio, method = "spearman"),
+    p   = cor.test(PO43, ChlA_Astax_Ratio, method = "spearman")$p.value
+  )
+```
+
+Spearman’s correlation between PO43 and ChlA:Astax in green samples is strongly negative (r ≈ −0.57, p < 0.001). When extreme ratio values (>200) are removed, the correlation actually becomes slightly stronger (r ≈ −0.62), indicating that the relationship is not driven by a few high-ratio outliers.
+
+```{r}
+summary(dfAnion_Ratio$ChlA_Astax_Ratio[dfAnion_Ratio$Color == "green"])
+```
+
+The ratio distribution is highly right-skewed (median ≈ 23.7, max ≈ 1510), but the negative monotonic trend persists even when extreme values are excluded.
+
+```{r}
+dfBulk %>%
+  filter(Color == "green") %>%
+  summarise(
+    rho_chla  = cor(PO43, ChlA, method = "spearman"),
+    rho_astax = cor(PO43, Astaxanthin, method = "spearman")
+  )
+```
+
+To understand this further, I checked correlations between PO43 and the individual pigments in green samples:
+	•	PO43 vs Chl a: r ≈ 0.25 (weak positive)
+	•	PO43 vs Astaxanthin: r ≈ 0.73 (strong positive)
+
+This explains the negative ratio relationship. Both pigments increase with phosphate, but astaxanthin increases much more strongly than chlorophyll a. Because the ratio is ChlA / Astaxanthin, a stronger increase in the denominator causes the ratio to decrease with increasing phosphate.
+
+# N:P Ratio
+
+In this section, I will:
+
+1.  Compare the N:P ratios between red and green snow (using Kruskal-Wallis/Dunn's post hoc) to determine whether the N:P ratio is significantly different between snow colors
+
+2.  Assess correlations between the N:P ratio and bulk pigment concentration, for red and green snow
+
+3.  Assess correlations between the N:P ratio and per-cell pigment concentration, for red and green snow
+
+4.  Assess correlations between the N:P ratio and cell density/volume, for red and green snow
+
+## Kruskal-Wallis and Dunn's Post-Hoc Testing
+
+Below, I use the Kruskal-Wallis test to run a non-parametric comparison of the N:P ratio across each snow color. Then, I follow up with a Dunn's post hoc test for the ratios that show significant differences between the snow colors. The below heatmap indicates that there is a significant difference in the N:P ratio between red and green snow, and clean and green snow, but not clean and red snow. N:P is significantly lower in green snow (0.0887) than red (0.4328) or clean (0.5654). 
+
+```{r}
+kw_np <- kruskal.test(NP_Ratio ~ Color, data = dfAnion)
+kw_np$p.value
+```
+
+```{r}
+dunn_np <- dunnTest(NP_Ratio ~ Color, 
+                    data = dfAnion %>% drop_na(NP_Ratio, Color),
+                    method = "bonferroni")
+
+dunnPairsNP <- dunn_np$res %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlot_NP <- ggplot(dunnPairsNP, 
+                      aes(x = Comparison, y = 1, fill = P.adj)) +
+  geom_tile(color = "white") +
+  geom_tile(data = filter(dunnPairsNP, significant),
+            color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue",
+                      name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    axis.text.y = element_blank(),
+    panel.grid = element_blank()
+  )
+
+dunnPlot_NP
+```
+
+## N:P Ratio & Bulk Pigment Correlations 
+Based on the below heatmap, it appears that the N:P ratio is significantly negatively correlated with all pigments for all samples combined and algae samples. Interestingly, for green samples, this relationship is especially pronounced for astaxanthin and lutein. Red samples, the strongest significant relationships are observed for astaxanthin and beta carotene.  A negative relationship implies that, as N:P decreases (and the system becomes more nitrogen-limited), pigment concentration increases. Especially for green samples and for astaxanthin and beta carotene in red samples, as N:P decreases, photoprotective pigment production increases significantly. Chlorophyll pigments show weak, non-significant negative associations with N:P in color-specific subsets, suggesting a more muted response compared to photoprotective pigments.
+
+  •	Low N:P → nitrogen limitation
+	•	Nitrogen limitation → stress physiology
+	•	Stress physiology → increased investment in photoprotective pigments
+
+```{r}
+# Define pigment and anion variables
+pigment_vars <- c("ChlA", "ChlB", "Astaxanthin", "Lutein", "BetaC", "Pheophytin", "Pheophorbide")
+anion_vars <- c("NP_Ratio")
+
+# Correlation function
+get_pigment_anion_corr <- function(data, group_name) {
+
+  cor_mat <- rcorr(as.matrix(data), type = "spearman")
+
+  r_vals <- cor_mat$r
+  p_vals <- cor_mat$P
+
+  expand.grid(
+    Pigment = pigment_vars,
+    Anion   = anion_vars,
+    stringsAsFactors = FALSE
+  ) %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[Anion, Pigment],
+      p_value    = p_vals[Anion, Pigment],
+      significant = p_value < 0.05,
+      label = paste0(
+        round(Spearman_r, 2),
+        "\n(p=", round(p_value, 3), ")"
+      ),
+      Group = group_name
+    ) %>%
+    ungroup()
+}
+
+# Red & Green (separate) 
+cor_color <- dfBulk %>%
+  filter(Color %in% c("red", "green")) %>%
+  select(Color, Algae, all_of(pigment_vars), all_of(anion_vars)) %>%
+  na.omit() %>%
+  group_split(Color) %>%
+  map_dfr(~get_pigment_anion_corr(
+    data = .x %>% select(-Color, -Algae),
+    group_name = unique(.x$Color)
+  ))
+
+# Algae (red + green pooled)
+cor_algae <- dfBulk %>%
+  filter(Algae == "algae") %>%
+  select(all_of(pigment_vars), all_of(anion_vars)) %>%
+  na.omit() %>%
+  get_pigment_anion_corr("algae")
+
+# All samples (red + green + clean) 
+cor_all <- dfBulk %>%
+  select(all_of(pigment_vars), all_of(anion_vars)) %>%
+  na.omit() %>%
+  get_pigment_anion_corr("all")
+
+# Combine 
+cor_results_all <- bind_rows(cor_color, cor_algae, cor_all)
+
+# Factor ordering
+cor_results_all$Pigment <- factor(cor_results_all$Pigment, levels = pigment_vars)
+cor_results_all$Anion   <- factor(cor_results_all$Anion, levels = anion_vars)
+cor_results_all$Group   <- factor(
+  cor_results_all$Group,
+  levels = c("red", "green", "algae", "all")
+)
+
+# Plot 
+heatmapPigNP <- ggplot(
+  cor_results_all,
+  aes(x = Pigment, y = Anion, fill = Spearman_r)
+) +
+  geom_tile() +
+  geom_tile(
+    data = filter(cor_results_all, significant),
+    color = "black",
+    linewidth = 0.75
+  ) +
+  geom_text(aes(label = label), size = 3) +
+  facet_wrap(~Group, ncol = 1) +
+  scale_fill_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    name = "Spearman r"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  )
+
+heatmapPigNP
+ggsave(heatmapPigNP, filename = "heatmapPigNP.png", width = 6, height = 4.0, bg = "white")
+```
+
+## N:P Ratio & Per-Cell Pigment Correlations 
+Based on the heatmap of per-cell pigment concentrations, the relationship between N:P and pigment content is more selective than in the bulk pigment data. When normalized by cell density, significant negative correlations are mainly restricted to photoprotective pigments rather than occurring across all pigments.
+
+For all samples combined and for algae-only samples, astaxanthin and lutein remain significantly negatively correlated with N:P. In green samples, this pattern is especially strong for astaxanthin and lutein. In red samples, astaxanthin is the only pigment that remains significantly negatively correlated with N:P. A negative relationship implies that as N:P decreases (consistent with increasing nitrogen limitation), per-cell concentrations of certain photoprotective pigments increase. Because these values are normalized by cell density, this suggests a shift in cellular pigment allocation rather than simply an increase in biomass. Chlorophyll pigments show weak, non-significant relationships with N:P across subsets, indicating that photosynthetic pigment investment per cell may be less sensitive to nutrient stoichiometry than photoprotective pigments.
+
+• Low N:P → nitrogen limitation
+• Nitrogen limitation → stress physiology
+• Stress physiology → increased per-cell investment in photoprotective pigments
+
+In contrast to the bulk pigment results, where N:P was significantly negatively correlated with nearly all pigments, the per-cell analysis shows that this relationship is largely restricted to astaxanthin and lutein. This suggests that the broad bulk signal was partly driven by changes in biomass (i.e., more cells under low N:P), whereas the per-cell results reflect true physiological shifts in pigment allocation. In other words, decreasing N:P is associated not only with more pigmented blooms overall, but with individual cells investing more heavily in specific photoprotective pigments under nutrient stress.
+
+```{r}
+# Define pigment and anion variables
+pigment_vars <- c("ChlA", "ChlB", "Astaxanthin", "Lutein", "BetaC", "Pheophytin", "Pheophorbide")
+anion_vars <- c("NP_Ratio")
+
+# Correlation function
+get_pigment_anion_corr <- function(data, group_name) {
+
+  cor_mat <- rcorr(as.matrix(data), type = "spearman")
+
+  r_vals <- cor_mat$r
+  p_vals <- cor_mat$P
+
+  expand.grid(
+    Pigment = pigment_vars,
+    Anion   = anion_vars,
+    stringsAsFactors = FALSE
+  ) %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[Anion, Pigment],
+      p_value    = p_vals[Anion, Pigment],
+      significant = p_value < 0.05,
+      label = paste0(
+        round(Spearman_r, 2),
+        "\n(p=", round(p_value, 3), ")"
+      ),
+      Group = group_name
+    ) %>%
+    ungroup()
+}
+
+# Red & Green (separate) 
+cor_color <- dfNorm %>%
+  filter(Color %in% c("red", "green")) %>%
+  select(Color, Algae, all_of(pigment_vars), all_of(anion_vars)) %>%
+  na.omit() %>%
+  group_split(Color) %>%
+  map_dfr(~get_pigment_anion_corr(
+    data = .x %>% select(-Color, -Algae),
+    group_name = unique(.x$Color)
+  ))
+
+# Algae (red + green pooled)
+cor_algae <- dfNorm %>%
+  filter(Algae == "algae") %>%
+  select(all_of(pigment_vars), all_of(anion_vars)) %>%
+  na.omit() %>%
+  get_pigment_anion_corr("algae")
+
+# All samples (red + green + clean) 
+cor_all <- dfNorm %>%
+  select(all_of(pigment_vars), all_of(anion_vars)) %>%
+  na.omit() %>%
+  get_pigment_anion_corr("all")
+
+# Combine 
+cor_results_all <- bind_rows(cor_color, cor_algae, cor_all)
+
+# Factor ordering
+cor_results_all$Pigment <- factor(cor_results_all$Pigment, levels = pigment_vars)
+cor_results_all$Anion   <- factor(cor_results_all$Anion, levels = anion_vars)
+cor_results_all$Group   <- factor(
+  cor_results_all$Group,
+  levels = c("red", "green", "algae", "all")
+)
+
+# Plot 
+heatmapNormPigNP <- ggplot(
+  cor_results_all,
+  aes(x = Pigment, y = Anion, fill = Spearman_r)
+) +
+  geom_tile() +
+  geom_tile(
+    data = filter(cor_results_all, significant),
+    color = "black",
+    linewidth = 0.75
+  ) +
+  geom_text(aes(label = label), size = 3) +
+  facet_wrap(~Group, ncol = 1) +
+  scale_fill_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    name = "Spearman r"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  )
+
+heatmapNormPigNP
+
+ggsave(heatmapNormPigNP, filename = "heatmapNormPigNP.png", width = 6, height = 4.0, bg = "white")
+```
+
+
+## N:P Ratio & Cell Density/Cell Volume
+For all samples combined, N:P is significantly negatively correlated with both cell density and cell volume, indicating that lower N:P ratios are associated with greater cell abundance and larger cell size. Similarly, within the algae-only subset, N:P is significantly negatively related to cell density, suggesting increased cellular abundance under lower N:P conditions.In green samples, the strongest relationship is observed between N:P and cell volume, where a significant negative correlation indicates that cells tend to be larger under lower N:P conditions. Red samples, in contrast, show weak and non-significant relationships.
+
+Overall, these patterns suggest that as N:P decreases (i.e., as systems become more nitrogen-limited, and less phosphorous-limited), blooms tend to exhibit higher cell densities and, in some subsets, increased cell size. 
+
+```{r}
+# Define pigment and anion variables
+pigment_vars <- c("CellDensity", "CellVolume")
+anion_vars <- c("NP_Ratio")
+
+# Correlation function
+get_pigment_anion_corr <- function(data, group_name) {
+
+  cor_mat <- rcorr(as.matrix(data), type = "spearman")
+
+  r_vals <- cor_mat$r
+  p_vals <- cor_mat$P
+
+  expand.grid(
+    Pigment = pigment_vars,
+    Anion   = anion_vars,
+    stringsAsFactors = FALSE
+  ) %>%
+    rowwise() %>%
+    mutate(
+      Spearman_r = r_vals[Anion, Pigment],
+      p_value    = p_vals[Anion, Pigment],
+      significant = p_value < 0.05,
+      label = paste0(
+        round(Spearman_r, 2),
+        "\n(p=", round(p_value, 3), ")"
+      ),
+      Group = group_name
+    ) %>%
+    ungroup()
+}
+
+# Red & Green (separate) 
+cor_color <- dfCell %>%
+  filter(Color %in% c("red", "green")) %>%
+  select(Color, Algae, all_of(pigment_vars), all_of(anion_vars)) %>%
+  na.omit() %>%
+  group_split(Color) %>%
+  map_dfr(~get_pigment_anion_corr(
+    data = .x %>% select(-Color, -Algae),
+    group_name = unique(.x$Color)
+  ))
+
+# Algae (red + green pooled)
+cor_algae <- dfCell %>%
+  filter(Algae == "algae") %>%
+  select(all_of(pigment_vars), all_of(anion_vars)) %>%
+  na.omit() %>%
+  get_pigment_anion_corr("algae")
+
+# All samples (red + green + clean) 
+cor_all <- dfCell %>%
+  select(all_of(pigment_vars), all_of(anion_vars)) %>%
+  na.omit() %>%
+  get_pigment_anion_corr("all")
+
+# Combine 
+cor_results_all <- bind_rows(cor_color, cor_algae, cor_all)
+
+# Factor ordering
+cor_results_all$Pigment <- factor(cor_results_all$Pigment, levels = pigment_vars)
+cor_results_all$Anion   <- factor(cor_results_all$Anion, levels = anion_vars)
+cor_results_all$Group   <- factor(
+  cor_results_all$Group,
+  levels = c("red", "green", "algae", "all")
+)
+
+# Plot 
+heatmapCellNP <- ggplot(
+  cor_results_all,
+  aes(x = Pigment, y = Anion, fill = Spearman_r)
+) +
+  geom_tile() +
+  geom_tile(
+    data = filter(cor_results_all, significant),
+    color = "black",
+    linewidth = 0.75
+  ) +
+  geom_text(aes(label = label), size = 3) +
+  facet_wrap(~Group, ncol = 1) +
+  scale_fill_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    name = "Spearman r"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  )
+
+heatmapCellNP
+```
+
+
+## N:P Ratio Publication Boxplot
+```{r}
+boxplotNPPub <- dfAnion %>% 
+  mutate(
+    Color = factor(Color, levels = c("green", "red", "clean"))) %>% 
+  ggplot(aes(x = Color, y = NP_Ratio, fill = Color, color = Color)) + 
+  geom_boxplot(alpha = 0.9, width = 0.8) + 
+  scale_fill_manual(values = colorPal) + 
+  scale_color_manual(values = colorPal) + 
+  labs(
+    x = NULL, 
+    y = expression("N:P"),
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt(breaks = c(0, 0.1, 0.5, 1, 2, 5, 10)) +
+  theme_minimal() +
+  plot_themePub +
+  theme(axis.text.x = element_text(margin = margin(t = 5)),
+        legend.position = "none") +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0, shape = 22),
+      keywidth = unit(1, "lines"),   # width of the legend key
+      keyheight = unit(1.5, "lines")   # height of the legend key
+    ))
+  
+boxplotNPPub
+
+ggsave(boxplotNPPub, filename = "boxplotNPPub.png", width = 5, height = 2.5, bg = "white")
+```
+
