@@ -1,0 +1,1516 @@
+---
+title: "Data Visualization & Analysis - Anion Concentration"
+author: "Ellie Ryan"
+date: "`r Sys.Date()`"
+output:
+   html_document:
+    theme: flatly
+    highlight: zenburn
+    toc: true
+    toc_float: true
+    toc_collapsed: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Created:** 7/23/2025
+
+**Last Modified:** 2/18/2026
+
+```{r, message=FALSE, warning=FALSE}
+# Load packages
+library(tidyverse)
+library(lubridate)
+library(stringr)
+library(kableExtra)
+library(scales)
+library(GGally)
+library(patchwork)
+library(Hmisc)
+library(reshape2)
+library(vegan)
+library(purrr)
+library(car)
+library(FSA)
+library(viridis)
+library(ggrepel)
+library(paletteer)
+library(ggforce)
+```
+
+```{r}
+colorPal <- c(
+  "clean" = "#95879f",
+  "red" = "#b04a25",
+  "green" = "#647d6a"
+)
+
+algaePal <- c(
+  "clean" = "#a5bdc0",
+  "algae" = "#735a69"
+)
+
+pigPal <- c(
+  "Astaxanthin" = "#b43f1f",
+  "Lutein" = "#f2bc1a",
+  "ChlB" = "#439468",
+  "ChlA" = "#37a133",
+  "BetaC" = "#bf7915",
+  "Pheophorbide" = "#534f8d", 
+  "Pheophytin" = "#95879f"
+)
+
+anionPal <- c(
+  "PO43" = "#7887A4FF",
+  "Cl" = "#9B6981FF",
+  "SO42" = "#682C37FF",
+  "Fo" = "#F6955EFF",
+  "NO2NO3" = "#A8CDECFF"
+)
+
+paletteer_d("nationalparkcolors::Arches")
+
+plot_theme <- theme(
+  text = element_text(family = "Helvetica"),
+  axis.title = element_text(size = 12, face = "bold"), # Axis labels: 12 pt, bold
+  axis.text = element_text(size = 12), # Axis text: 12 pt
+  axis.line = element_line(linewidth = 0.5),  # Thicker axis line
+  legend.position = "top", # Position legend at the top
+  legend.justification = c(0, 1), # Justify legend to top-left
+  legend.text = element_text(size = 12), # Legend text: 12 pt
+  legend.title = element_text(size = 12), 
+  plot.title = element_text(size = 14, face = "bold"),  # Adjust plot title size
+  plot.subtitle = element_text(size = 13, face = "italic"), 
+  plot.margin = margin(20, 20, 20, 20)
+)
+
+plot_themePub <- theme(
+  text = element_text(family = "Helvetica"),
+  axis.title.x = element_text(size = 12, margin = margin(t = 10)),  # t = top margin
+  axis.title.y = element_text(size = 12, margin = margin(r = 10)),  # r = right margin
+  axis.text = element_text(size = 12),
+  axis.line = element_blank(),
+  axis.ticks.x = element_blank(),
+  axis.ticks.y = element_line(color = "black", linewidth = 0.25),  # Add tick marks
+  axis.ticks.length = unit(-0.15, "cm"),  # Length of tick marks
+  panel.grid = element_blank(),
+  panel.background = element_blank(),
+  panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
+  legend.position = "top",
+  legend.justification = c(0, 1),
+  legend.text = element_text(size = 12),
+  legend.title = element_text(size = 12),
+  plot.title = element_text(size = 14, face = "bold"),
+  plot.subtitle = element_text(size = 13, face = "italic"),
+  plot.margin = margin(20, 20, 20, 20)
+)
+
+plot_theme2 <- theme(
+  text = element_text(family = "Helvetica"),
+  axis.title = element_text(size = 12, face = "bold"), # Axis labels: 12 pt, bold
+  axis.text = element_text(size = 12), # Axis text: 12 pt
+  axis.line = element_line(linewidth = 0.5),  # Thicker axis line
+  legend.position = "top", # Position legend at the top
+  legend.justification = c(0, 1), # Justify legend to top-left
+  legend.text = element_text(size = 12), # Legend text: 12 pt
+  legend.title = element_text(size = 12), 
+  plot.title = element_text(size = 14, face = "bold"),  # Adjust plot title size
+  plot.subtitle = element_text(size = 13, face = "italic"), 
+  axis.text.x = element_text(angle = 45, hjust = 1), 
+  plot.margin = margin(20, 20, 20, 20)
+)
+
+pairsplot_theme <- theme(
+  text = element_text(family = "Helvetica", size = 10),
+  axis.text = element_text(size = 8),  # Adjust axis text size
+  plot.title = element_text(size = 12, face = "bold"),  # Adjust plot title size
+  legend.text = element_text(size = 12))  # Adjust legend text size
+```
+
+# Overview
+
+The purpose of this `.Rmd` is to visualize anion concentration (µM) by snow color, and obtain basic summary statistics associated with each anion. I will additionally perform an ordination to reduce the dimensions of my anion data for simpler visualizations. Before proceeding, I will clean the dataset so that it features only the variables I am interested in for this analysis. In this dataset, 107 samples are used from the Antarctic Peninsula, following the removal of 6 outliers. These observations are broken down by `Color`, or the apparent snow color at time of sample collection. To keep things simple, there are only three levels to the `Color` category: red, green and clean. The breakdown of samples collected in the WAP is as follows:
+
+-   Antarctic Peninsula:
+    -   107 samples
+        -   43 red
+        -   46 green
+        -   18 clean
+        
+From anion outlier analysis, the following outliers were identified for removal:
+
+-   2025-02-19-SI-algae3 (green)
+-   2025-02-24-DA-algae1 (green)
+-   2025-02-24-DA-algae2 (red)
+-   2025-02-24-DA-algae6 (green)
+-   2025-03-07-NH-algae3 (clean)
+-   2025-01-12-PI-algae10 (red)
+
+
+See the Preliminary Results and Figures doc for justification for removal of each. 
+
+## Data Wrangling
+
+```{r}
+df <- read.csv("CompiledDataPI.csv")
+str(df)
+```
+
+Adding an `Algae` column to classify samples as algae or clean snow samples and a `LocColor` column to classify AP algae samples as red or green. 
+
+```{r}
+# Format date column 
+df <- df %>%
+  mutate(
+    Date = as.Date(Date, format = "%m/%d/%y"))
+
+# Add Algae column
+df <- df %>% 
+  mutate(Algae = case_when(
+    Color %in% c("red", "green") ~ "algae",
+    Color == "clean" ~ 'clean'
+  )) %>% 
+  relocate(Algae, .after = Color)
+
+# Add LocAbbrev
+df <- df %>% mutate(LocAbbrev = case_when(
+  Location == "Antarctic Peninsula" ~ paste("WAP")
+)) %>%  
+  relocate(LocAbbrev, .after = Location)
+
+# Convert anion concentrations to µM
+df <- df %>% 
+  mutate(Fo = 22.21*Fo,
+         Cl = 28.21*Cl,
+         NO2 = 21.73*NO2,
+         NO3 = 16.13*NO3, 
+         PO43 = 10.53*PO43, 
+         SO42 = 10.41*SO42)
+```
+
+Remove outliers from analysis: 
+```{r}
+outliers <- c(
+  "2025-02-19-SI-algae3",
+  "2025-02-24-DA-algae2",
+  "2025-02-24-DA-algae6",
+  "2025-03-07-NH-algae3",
+  "2025-01-12-PI-algae10",
+  "2025-02-24-DA-algae1"
+  )
+
+df <- df %>% 
+  filter(!SampleID %in% outliers)
+```
+
+### Anions Dataset
+```{r}
+dfAnion <- df %>% 
+  select(c("SampleID", "Date", "Location", "Site", "LocAbbrev", "Color", "Algae", Fo:SO42)) %>% 
+  mutate(NO2NO3 = NO2 + NO3) %>% 
+  relocate(NO2NO3, .after = Cl) %>% 
+  select(!NO2) %>% 
+  select(!NO3) %>% 
+  na.omit(dfAnion)
+
+# Add N:P Ratio
+dfAnion <- dfAnion %>% 
+  mutate(NP_Ratio = ifelse(PO43 > 0, NO2NO3 / PO43, NA_real_))
+```
+
+### Anions Dataset (Separate NO2, NO3)
+```{r}
+dfAnionN <- df %>% 
+  select(c("SampleID", "Date", "Location", "Site", "LocAbbrev", "Color", "Algae", Fo:SO42)) %>% 
+  na.omit(dfAnion)
+
+```
+
+### Anions (Pivoted)
+```{r}
+dfAnion_long <- dfAnion %>% 
+  pivot_longer(cols = c(Fo, Cl, SO42, PO43, NO2NO3),
+               names_to = "Anion",
+               values_to = "Concentration")
+```
+
+# Summary Tables {.tabset}
+```{r}
+# Helper function: significant figures + commas + preserve .0 for integers
+fmt_sigfig <- function(x, sig = 4) {
+  # Round to significant figures
+  y <- signif(x, sig)
+  
+  # Convert to string with commas
+  out <- prettyNum(y, big.mark = ",", scientific = FALSE)
+  
+  # Add ".0" if number is an integer after rounding
+  out[grepl("^\\d+$", out)] <- paste0(out[grepl("^\\d+$", out)], ".0")
+  
+  return(out)
+}
+```
+
+
+## Formate
+```{r}
+# Anion Summary (formate)
+FoSummary <- dfAnion %>% 
+  group_by(Color) %>% 
+  summarise(
+    n = n(),
+    Fo_mean = fmt_sigfig(mean(Fo, na.rm = TRUE)),
+    Fo_median = fmt_sigfig(median(Fo, na.rm = TRUE)),
+    Fo_max = fmt_sigfig(max(Fo, na.rm = TRUE)),
+    Fo_min = fmt_sigfig(min(Fo, na.rm = TRUE)),
+    Fo_sd = fmt_sigfig(sd(Fo, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+# Add "all" for each site
+FoSummaryAll <- dfAnion %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    Fo_mean = fmt_sigfig(mean(Fo, na.rm = TRUE)),
+    Fo_median = fmt_sigfig(median(Fo, na.rm = TRUE)),
+    Fo_max = fmt_sigfig(max(Fo, na.rm = TRUE)),
+    Fo_min = fmt_sigfig(min(Fo, na.rm = TRUE)),
+    Fo_sd = fmt_sigfig(sd(Fo, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+# Filter Antarctic red + green
+FoSummaryAPRG <- dfAnion %>%
+  filter(Color %in% c("red", "green")) %>%
+  summarise(
+    Color = "red+green",
+    n = n(),
+    Fo_mean = fmt_sigfig(mean(Fo, na.rm = TRUE)),
+    Fo_median = fmt_sigfig(median(Fo, na.rm = TRUE)),
+    Fo_max = fmt_sigfig(max(Fo, na.rm = TRUE)),
+    Fo_min = fmt_sigfig(min(Fo, na.rm = TRUE)),
+    Fo_sd = fmt_sigfig(sd(Fo, na.rm = TRUE)),
+  )
+
+# Combine and order rows
+FoSummary <- bind_rows(FoSummaryAll, FoSummary, FoSummaryAPRG) %>% 
+  arrange(match(Color, c("green", "red", "red+green", "clean", "all")))
+
+# Format table with kableExtra
+FoSummary %>% 
+  kable("html", caption = "Summary Statistics for Formate by Snow Color (µM)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+## Chloride
+```{r}
+# Anion Summary (Chloride)
+ClSummary <- dfAnion %>% 
+  group_by(Color) %>% 
+  summarise(
+    n = n(),
+    Cl_mean = fmt_sigfig(mean(Cl, na.rm = TRUE)),
+    Cl_median = fmt_sigfig(median(Cl, na.rm = TRUE)),
+    Cl_max = fmt_sigfig(max(Cl, na.rm = TRUE)),
+    Cl_min = fmt_sigfig(min(Cl, na.rm = TRUE)),
+    Cl_sd = fmt_sigfig(sd(Cl, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+# Add "all" for each site
+ClSummaryAll <- dfAnion %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    Cl_mean = fmt_sigfig(mean(Cl, na.rm = TRUE)),
+    Cl_median = fmt_sigfig(median(Cl, na.rm = TRUE)),
+    Cl_max = fmt_sigfig(max(Cl, na.rm = TRUE)),
+    Cl_min = fmt_sigfig(min(Cl, na.rm = TRUE)),
+    Cl_sd = fmt_sigfig(sd(Cl, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+# Filter Antarctic red + green
+ClSummaryAPRG <- dfAnion %>%
+  filter(Color %in% c("red", "green")) %>%
+  summarise(
+    Color = "red+green",
+    n = n(),
+    Cl_mean = fmt_sigfig(mean(Cl, na.rm = TRUE)),
+    Cl_median = fmt_sigfig(median(Cl, na.rm = TRUE)),
+    Cl_max = fmt_sigfig(max(Cl, na.rm = TRUE)),
+    Cl_min = fmt_sigfig(min(Cl, na.rm = TRUE)),
+    Cl_sd = fmt_sigfig(sd(Cl, na.rm = TRUE)),
+  )
+
+# Combine and order rows
+ClSummary <- bind_rows(ClSummaryAll, ClSummary, ClSummaryAPRG) %>% 
+  arrange(match(Color, c("green", "red", "red+green", "clean", "all")))
+
+# Format table with kableExtra
+ClSummary %>% 
+  kable("html", caption = "Summary Statistics for Chloride by Snow Color (µM)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+## Nitrate/Nitrite {.tabset}
+
+### NO2
+```{r}
+# Anion Summary (NO2)
+NO2Summary <- dfAnionN %>% 
+  group_by(Color) %>% 
+  summarise(
+    n = n(),
+    NO2_mean = fmt_sigfig(mean(NO2, na.rm = TRUE)),
+    NO2_median = fmt_sigfig(median(NO2, na.rm = TRUE)),
+    NO2_max = fmt_sigfig(max(NO2, na.rm = TRUE)),
+    NO2_min = fmt_sigfig(min(NO2, na.rm = TRUE)),
+    NO2_sd = fmt_sigfig(sd(NO2, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+# Add "all" for each site
+NO2SummaryAll <- dfAnionN %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    NO2_mean = fmt_sigfig(mean(NO2, na.rm = TRUE)),
+    NO2_median = fmt_sigfig(median(NO2, na.rm = TRUE)),
+    NO2_max = fmt_sigfig(max(NO2, na.rm = TRUE)),
+    NO2_min = fmt_sigfig(min(NO2, na.rm = TRUE)),
+    NO2_sd = fmt_sigfig(sd(NO2, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+# Filter Antarctic red + green
+NO2SummaryAPRG <- dfAnionN %>%
+  filter(Color %in% c("red", "green")) %>%
+  summarise(
+    Color = "red+green",
+    n = n(),
+    NO2_mean = fmt_sigfig(mean(NO2, na.rm = TRUE)),
+    NO2_median = fmt_sigfig(median(NO2, na.rm = TRUE)),
+    NO2_max = fmt_sigfig(max(NO2, na.rm = TRUE)),
+    NO2_min = fmt_sigfig(min(NO2, na.rm = TRUE)),
+    NO2_sd = fmt_sigfig(sd(NO2, na.rm = TRUE)),
+  )
+
+# Combine and order rows
+NO2Summary <- bind_rows(NO2SummaryAll, NO2Summary, NO2SummaryAPRG) %>% 
+  arrange(match(Color, c("green", "red", "red+green", "clean", "all")))
+
+# Format table with kableExtra
+NO2Summary %>% 
+  kable("html", caption = "Summary Statistics for NO2 by Snow Color (µM)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+### NO3
+```{r}
+# Anion Summary (NO3)
+NO3Summary <- dfAnionN %>% 
+  group_by(Color) %>% 
+  summarise(
+    n = n(),
+    NO3_mean = fmt_sigfig(mean(NO3, na.rm = TRUE)),
+    NO3_median = fmt_sigfig(median(NO3, na.rm = TRUE)),
+    NO3_max = fmt_sigfig(max(NO3, na.rm = TRUE)),
+    NO3_min = fmt_sigfig(min(NO3, na.rm = TRUE)),
+    NO3_sd = fmt_sigfig(sd(NO3, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+# Add "all" for each site
+NO3SummaryAll <- dfAnionN %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    NO3_mean = fmt_sigfig(mean(NO3, na.rm = TRUE)),
+    NO3_median = fmt_sigfig(median(NO3, na.rm = TRUE)),
+    NO3_max = fmt_sigfig(max(NO3, na.rm = TRUE)),
+    NO3_min = fmt_sigfig(min(NO3, na.rm = TRUE)),
+    NO3_sd = fmt_sigfig(sd(NO3, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+# Filter Antarctic red + green
+NO3SummaryAPRG <- dfAnionN %>%
+  filter(Color %in% c("red", "green")) %>%
+  summarise(
+    Color = "red+green",
+    n = n(),
+    NO3_mean = fmt_sigfig(mean(NO3, na.rm = TRUE)),
+    NO3_median = fmt_sigfig(median(NO3, na.rm = TRUE)),
+    NO3_max = fmt_sigfig(max(NO3, na.rm = TRUE)),
+    NO3_min = fmt_sigfig(min(NO3, na.rm = TRUE)),
+    NO3_sd = fmt_sigfig(sd(NO3, na.rm = TRUE)),
+  )
+
+# Combine and order rows
+NO3Summary <- bind_rows(NO3SummaryAll, NO3Summary, NO3SummaryAPRG) %>% 
+  arrange(match(Color, c("green", "red", "red+green", "clean", "all")))
+
+# Format table with kableExtra
+NO3Summary %>% 
+  kable("html", caption = "Summary Statistics for NO3 by Snow Color (µM)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+### NOx
+```{r}
+# Anion Summary (NOx)
+NO2NO3Summary <- dfAnion %>% 
+  group_by(Color) %>% 
+  summarise(
+    n = n(),
+    NOx_mean = fmt_sigfig(mean(NO2NO3, na.rm = TRUE)),
+    NOx_median = fmt_sigfig(median(NO2NO3, na.rm = TRUE)),
+    NOx_max = fmt_sigfig(max(NO2NO3, na.rm = TRUE)),
+    NOx_min = fmt_sigfig(min(NO2NO3, na.rm = TRUE)),
+    NOx_sd = fmt_sigfig(sd(NO2NO3, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+# Add "all" for each site
+NO2NO3SummaryAll <- dfAnion %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    NOx_mean = fmt_sigfig(mean(NO2NO3, na.rm = TRUE)),
+    NOx_median = fmt_sigfig(median(NO2NO3, na.rm = TRUE)),
+    NOx_max = fmt_sigfig(max(NO2NO3, na.rm = TRUE)),
+    NOx_min = fmt_sigfig(min(NO2NO3, na.rm = TRUE)),
+    NOx_sd = fmt_sigfig(sd(NO2NO3, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+# Filter Antarctic red + green
+NO2NO3SummaryAPRG <- dfAnion %>%
+  filter(Color %in% c("red", "green")) %>%
+  summarise(
+    Color = "red+green",
+    n = n(),
+    NOx_mean = fmt_sigfig(mean(NO2NO3, na.rm = TRUE)),
+    NOx_median = fmt_sigfig(median(NO2NO3, na.rm = TRUE)),
+    NOx_max = fmt_sigfig(max(NO2NO3, na.rm = TRUE)),
+    NOx_min = fmt_sigfig(min(NO2NO3, na.rm = TRUE)),
+    NOx_sd = fmt_sigfig(sd(NO2NO3, na.rm = TRUE)),
+  )
+
+# Combine and order rows
+NO2NO3Summary <- bind_rows(NO2NO3SummaryAll, NO2NO3Summary, NO2NO3SummaryAPRG) %>% 
+  arrange(match(Color, c("green", "red", "red+green", "clean", "all")))
+
+# Format table with kableExtra
+NO2NO3Summary %>% 
+  kable("html", caption = "Summary Statistics for NOx by Snow Color (µM)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+## Sulfate
+```{r}
+# Anion Summary (Sulfate)
+SO42Summary <- dfAnion %>% 
+  group_by(Color) %>% 
+  summarise(
+    n = n(),
+    SO42_mean = fmt_sigfig(mean(SO42, na.rm = TRUE)),
+    SO42_median = fmt_sigfig(median(SO42, na.rm = TRUE)),
+    SO42_max = fmt_sigfig(max(SO42, na.rm = TRUE)),
+    SO42_min = fmt_sigfig(min(SO42, na.rm = TRUE)),
+    SO42_sd = fmt_sigfig(sd(SO42, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+# Add "all" for each site
+SO42SummaryAll <- dfAnion %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    SO42_mean = fmt_sigfig(mean(SO42, na.rm = TRUE)),
+    SO42_median = fmt_sigfig(median(SO42, na.rm = TRUE)),
+    SO42_max = fmt_sigfig(max(SO42, na.rm = TRUE)),
+    SO42_min = fmt_sigfig(min(SO42, na.rm = TRUE)),
+    SO42_sd = fmt_sigfig(sd(SO42, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+# Filter Antarctic red + green
+SO42SummaryAPRG <- dfAnion %>%
+  filter(Color %in% c("red", "green")) %>%
+  summarise(
+    Color = "red+green",
+    n = n(),
+    SO42_mean = fmt_sigfig(mean(SO42, na.rm = TRUE)),
+    SO42_median = fmt_sigfig(median(SO42, na.rm = TRUE)),
+    SO42_max = fmt_sigfig(max(SO42, na.rm = TRUE)),
+    SO42_min = fmt_sigfig(min(SO42, na.rm = TRUE)),
+    SO42_sd = fmt_sigfig(sd(SO42, na.rm = TRUE)),
+  )
+
+# Combine and order rows
+SO42Summary <- bind_rows(SO42SummaryAll, SO42Summary, SO42SummaryAPRG) %>% 
+  arrange(match(Color, c("green", "red", "red+green", "clean", "all")))
+
+# Format table with kableExtra
+SO42Summary %>% 
+  kable("html", caption = "Summary Statistics for Sulfate by Snow Color (µM)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+## Phosphate
+```{r}
+# Anion Summary (Phosphate)
+PO43Summary <- dfAnion %>% 
+  group_by(Color) %>% 
+  summarise(
+    n = n(),
+    PO43_mean = fmt_sigfig(mean(PO43, na.rm = TRUE)),
+    PO43_median = fmt_sigfig(median(PO43, na.rm = TRUE)),
+    PO43_max = fmt_sigfig(max(PO43, na.rm = TRUE)),
+    PO43_min = fmt_sigfig(min(PO43, na.rm = TRUE)),
+    PO43_sd = fmt_sigfig(sd(PO43, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+# Add "all" for each site
+PO43SummaryAll <- dfAnion %>% 
+  summarise(
+    Color = "all",
+    n = n(),
+    PO43_mean = fmt_sigfig(mean(PO43, na.rm = TRUE)),
+    PO43_median = fmt_sigfig(median(PO43, na.rm = TRUE)),
+    PO43_max = fmt_sigfig(max(PO43, na.rm = TRUE)),
+    PO43_min = fmt_sigfig(min(PO43, na.rm = TRUE)),
+    PO43_sd = fmt_sigfig(sd(PO43, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+# Filter Antarctic red + green
+PO43SummaryAPRG <- dfAnion %>%
+  filter(Color %in% c("red", "green")) %>%
+  summarise(
+    Color = "red+green",
+    n = n(),
+    PO43_mean = fmt_sigfig(mean(PO43, na.rm = TRUE)),
+    PO43_median = fmt_sigfig(median(PO43, na.rm = TRUE)),
+    PO43_max = fmt_sigfig(max(PO43, na.rm = TRUE)),
+    PO43_min = fmt_sigfig(min(PO43, na.rm = TRUE)),
+    PO43_sd = fmt_sigfig(sd(PO43, na.rm = TRUE)),
+  )
+
+# Combine and order rows
+PO43Summary <- bind_rows(PO43SummaryAll, PO43Summary, PO43SummaryAPRG) %>% 
+  arrange(match(Color, c("green", "red", "red+green", "clean", "all")))
+
+# Format table with kableExtra
+PO43Summary %>% 
+  kable("html", caption = "Summary Statistics for Phosphate by Snow Color (µM)", escape = FALSE) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 14)
+```
+
+# ANOVA/Kruskal Wallis Test 
+
+## Check ANOVA Assumptions
+Before proceeding with an ANOVA test to assess differences in anion concentration between snow colors, I am going to check to see if these variables follow the assumptions of normality and equal variance required to run an ANOVA: 
+```{r}
+# Step 1: Group by pigment and nest data
+nested <- dfAnion_long %>%
+  group_by(Anion) %>%
+  nest()
+
+# Step 2: Fit ANOVA model, extract residuals, and run tests
+anovaAssumptionsResults <- nested %>%
+  mutate(
+    # Fit ANOVA model
+    aov_model = map(data, ~ aov(Concentration ~ Color, data = .x)),
+    
+    # Shapiro-Wilk test for normality of residuals
+    shapiro_p = map_dbl(aov_model, ~ shapiro.test(residuals(.x))$p.value),
+    
+    # Levene's Test for homogeneity of variance
+    levene_p = map_dbl(data, ~leveneTest(Concentration ~ factor(Color), data = .x)$`Pr(>F)`[1])
+  )
+```
+
+From the below results, it appears that none of the anions are both normally distributed and have equal variances. Because of this, I am going to proceed with a Kruskal-Wallis test in lieu of an ANOVA. 
+
+```{r}
+anovaAssumptionsResults %>%
+  select(Anion, shapiro_p, levene_p) %>%
+  mutate(
+    normality_ok = shapiro_p > 0.05,
+    homogeneity_ok = levene_p > 0.05
+  )
+```
+
+## Kruskal-Wallis Test {.tabset}
+
+### Anions
+
+```{r}
+# Run kruskal wallis test 
+kruskalResultsAP <- dfAnion_long %>%
+  filter(Location == "Antarctic Peninsula") %>% 
+  group_by(Anion) %>%
+  nest() %>%
+  mutate(
+    kruskal = map(data, ~ kruskal.test(Concentration ~ Color, data = .x)),
+    kw_p = map_dbl(kruskal, ~ .x$p.value)
+  )
+
+# Run Dunn's test 
+kruskalResultsAP <- kruskalResultsAP %>%
+  mutate(
+    dunn = map(data, ~ dunnTest(Concentration ~ factor(Color), data = .x, method = "bonferroni")),
+    dunn_table = map(dunn, ~ .x$res)
+  )
+```
+
+#### Visualize Results
+```{r}
+dunnPairsAP <- kruskalResultsAP %>%
+  select(Anion, dunn_table) %>%
+  unnest(dunn_table) %>%
+  mutate(
+    significant = P.adj < 0.05,
+    label = paste0("p=", round(P.adj, 3))
+  )
+```
+
+```{r}
+dunnPlot_AP <- ggplot(dunnPairsAP, aes(x = Comparison, y = Anion, fill = P.adj)) +
+  geom_tile() +
+  geom_tile(data = filter(dunnPairsAP, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient(low = "tomato", high = "lightblue", name = "Adj. p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) 
+
+dunnPlot_AP
+
+ggsave(dunnPlot_AP, filename = "dunnPlot_AP.png", width = 7, height = 6, bg = "white")
+```
+
+### N:P Ratio
+```{r}
+dfRatio <- dfAnion %>%
+  filter(!is.na(NP_Ratio), !is.na(Color)) %>%
+  mutate(Color = factor(Color))
+
+# Run kruskal wallis test 
+kruskalResultsNP <- kruskal.test(NP_Ratio ~ Color, data = dfRatio)
+
+kruskalResultsNP$statistic
+kruskalResultsNP$p.value
+```
+
+```{r}
+dunnResultsNP <- dunnTest(NP_Ratio ~ Color,
+                        data = dfRatio,
+                        method = "bonferroni")
+
+dunnResultsNP
+```
+
+# Box Plots {.tabset}
+
+## All Anions (All Samples)
+```{r}
+boxplotAll <- dfAnion_long %>%
+  ggplot(aes(x = Anion, y = Concentration, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Conecntration (µM)",
+    fill = NULL,
+    color = NULL
+  ) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme2
+
+boxplotAll
+
+ggsave(boxplotAll, filename = "boxplotAll.png", width = 7, height = 5, bg = "white")
+```
+
+## Formate
+```{r}
+boxplotFo <- dfAnion %>%
+  ggplot(aes(x = Color, y = Fo, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (µM)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotFo
+
+ggsave(boxplotFo, filename = "boxplotFo.png", width = 7, height = 5, bg = "white")
+```
+
+## Chloride
+```{r}
+boxplotCl <- dfAnion %>%
+  ggplot(aes(x = Color, y = Cl, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (µM)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotCl
+
+ggsave(boxplotCl, filename = "boxplotCl.png", width = 7, height = 5, bg = "white")
+```
+
+## Nitrate/Nitrite
+```{r}
+boxplotNO2NO3 <- dfAnion %>%
+  ggplot(aes(x = Color, y = NO2NO3, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (µM)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotNO2NO3
+
+ggsave(boxplotNO2NO3, filename = "boxplotNO2NO3.png", width = 7, height = 5, bg = "white")
+```
+
+## Phosphate
+```{r}
+boxplotPO43 <- dfAnion %>%
+  ggplot(aes(x = Color, y = PO43, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (µM)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotPO43
+
+ggsave(boxplotPO43, filename = "boxplotPO43.png", width = 7, height = 5, bg = "white")
+```
+
+## Sulfate
+```{r}
+boxplotSO42 <- dfAnion %>%
+  ggplot(aes(x = Color, y = SO42, fill = Color, color = Color)) +
+  geom_boxplot(alpha = 0.8,
+               width = 0.8, 
+               position = position_dodge2(width = 0.8, preserve = "single")) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(
+    x = NULL,
+    y = "Concentration (µM)",
+    fill = NULL,
+    color = NULL) +
+  scale_y_sqrt() +
+  theme_minimal() +
+  plot_theme
+
+boxplotSO42
+
+ggsave(boxplotSO42, filename = "boxplotSO42.png", width = 7, height = 5, bg = "white")
+```
+
+# Pairs Plots - Pigments {.tabset}
+
+```{r, warning = FALSE, message = FALSE}
+corplotAll <- ggpairs(
+  dfAnion,  
+  columns = c("Fo", "Cl", "NO2NO3", "PO43", "SO42"), 
+  aes(color = Color, fill = Color, alpha = 0.8),
+  diag = list(continuous = wrap("barDiag")),
+  lower = list(continuous = wrap("points", na.rm = TRUE)),
+  upper = list(continuous = wrap("cor", size = 3, na.rm = TRUE))
+) + 
+  theme_minimal() +
+  pairsplot_theme + 
+  scale_color_manual(values = colorPal) + 
+  scale_fill_manual(values = colorPal) 
+   
+
+corplotAll
+
+ggsave(corplotAll, filename = "corplotAll.png", width = 7, height = 7, bg = "white")
+```
+
+# Heat Maps - Anions {.tabset}
+
+## All Samples
+```{r}
+cor.mtest <- function(mat, method = "spearman") {
+  mat <- as.matrix(mat)
+  n <- ncol(mat)
+  p.mat <- matrix(NA, n, n)
+  diag(p.mat) <- 0
+  for (i in 1:(n - 1)) {
+    for (j in (i + 1):n) {
+      tmp <- cor.test(mat[, i], mat[, j], method = method)
+      p.mat[i, j] <- p.mat[j, i] <- tmp$p.value
+    }
+  }
+  colnames(p.mat) <- rownames(p.mat) <- colnames(mat)
+  return(list(p = p.mat))
+}
+
+# Define pigment variables
+anion_vars <- c("Fo", "Cl", "NO2NO3", "PO43", "SO42")
+
+# List of locations
+locations <- unique(dfAnion$LocAbbrev)
+
+# Function to calculate correlation matrices for each location
+get_corr_data <- function(location) {
+  data_sub <- dfAnion %>%
+    filter(LocAbbrev == location) %>%
+    select(all_of(anion_vars)) %>%
+    na.omit()
+
+  cor_matrix <- cor(data_sub, method = "spearman")
+  p_matrix <- cor.mtest(data_sub, method = "spearman")$p
+
+  cor_long <- reshape2::melt(cor_matrix)
+  p_long <- reshape2::melt(p_matrix)
+
+  merged <- merge(cor_long, p_long, by = c("Var1", "Var2"))
+  colnames(merged) <- c("Variable1", "Variable2", "Spearman_r", "p_value")
+  merged$Location <- location
+
+  return(merged)
+}
+
+# Apply across locations
+heatmap_data <- do.call(rbind, lapply(locations, get_corr_data))
+
+# Factor levels for correct ordering
+heatmap_data$Variable1 <- factor(heatmap_data$Variable1, levels = anion_vars)
+heatmap_data$Variable2 <- factor(heatmap_data$Variable2, levels = anion_vars)
+
+# Create label
+heatmap_data$label <- paste0(round(heatmap_data$Spearman_r, 2), "\n(p=", round(heatmap_data$p_value, 3), ")")
+heatmap_data$significant <- heatmap_data$p_value < 0.05
+
+# Remove upper triangle + diagonal if desired (optional)
+heatmap_data <- heatmap_data %>%
+  filter(as.numeric(Variable1) > as.numeric(Variable2))
+
+# Plot
+heatmapAnionAll <- ggplot(heatmap_data, aes(x = Variable1, y = Variable2, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = subset(heatmap_data, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  facet_wrap(~Location) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_blank()) 
+
+heatmapAnionAll
+
+ggsave(heatmapAnionAll, filename = "heatmapAnionAll.png", width = 11.5, height = 7, bg = "white")
+
+```
+
+## Algae Samples
+```{r}
+cor.mtest <- function(mat, method = "spearman") {
+  mat <- as.matrix(mat)
+  n <- ncol(mat)
+  p.mat <- matrix(NA, n, n)
+  diag(p.mat) <- 0
+  for (i in 1:(n - 1)) {
+    for (j in (i + 1):n) {
+      tmp <- cor.test(mat[, i], mat[, j], method = method)
+      p.mat[i, j] <- p.mat[j, i] <- tmp$p.value
+    }
+  }
+  colnames(p.mat) <- rownames(p.mat) <- colnames(mat)
+  return(list(p = p.mat))
+}
+
+# Define pigment variables
+anion_vars <- c("Fo", "Cl", "NO2NO3", "PO43", "SO42")
+
+# List of locations
+locations <- unique(dfAnion$LocAbbrev)
+
+# Function to calculate correlation matrices for each location
+get_corr_data <- function(location) {
+  data_sub <- dfAnion %>%
+    filter(Algae == "algae") %>% 
+    filter(LocAbbrev == location) %>%
+    select(all_of(anion_vars)) %>%
+    na.omit()
+
+  cor_matrix <- cor(data_sub, method = "spearman")
+  p_matrix <- cor.mtest(data_sub, method = "spearman")$p
+
+  cor_long <- reshape2::melt(cor_matrix)
+  p_long <- reshape2::melt(p_matrix)
+
+  merged <- merge(cor_long, p_long, by = c("Var1", "Var2"))
+  colnames(merged) <- c("Variable1", "Variable2", "Spearman_r", "p_value")
+  merged$Location <- location
+
+  return(merged)
+}
+
+# Apply across locations
+heatmap_data <- do.call(rbind, lapply(locations, get_corr_data))
+
+# Factor levels for correct ordering
+heatmap_data$Variable1 <- factor(heatmap_data$Variable1, levels = anion_vars)
+heatmap_data$Variable2 <- factor(heatmap_data$Variable2, levels = anion_vars)
+
+# Create label
+heatmap_data$label <- paste0(round(heatmap_data$Spearman_r, 2), "\n(p=", round(heatmap_data$p_value, 3), ")")
+heatmap_data$significant <- heatmap_data$p_value < 0.05
+
+# Remove upper triangle + diagonal if desired (optional)
+heatmap_data <- heatmap_data %>%
+  filter(as.numeric(Variable1) > as.numeric(Variable2))
+
+# Plot
+heatmapAnionAlgae <- ggplot(heatmap_data, aes(x = Variable1, y = Variable2, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = subset(heatmap_data, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  facet_wrap(~Location) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_blank()) 
+
+heatmapAnionAlgae
+
+ggsave(heatmapAnionAlgae, filename = "heatmapAnionAlgae.png", width = 11.5, height = 7, bg = "white")
+
+```
+
+## Clean Samples
+```{r}
+cor.mtest <- function(mat, method = "spearman") {
+  mat <- as.matrix(mat)
+  n <- ncol(mat)
+  p.mat <- matrix(NA, n, n)
+  diag(p.mat) <- 0
+  for (i in 1:(n - 1)) {
+    for (j in (i + 1):n) {
+      tmp <- cor.test(mat[, i], mat[, j], method = method)
+      p.mat[i, j] <- p.mat[j, i] <- tmp$p.value
+    }
+  }
+  colnames(p.mat) <- rownames(p.mat) <- colnames(mat)
+  return(list(p = p.mat))
+}
+
+# Define pigment variables
+anion_vars <- c("Fo", "Cl", "NO2NO3", "PO43", "SO42")
+
+# List of locations
+locations <- unique(dfAnion$LocAbbrev)
+
+# Function to calculate correlation matrices for each location
+get_corr_data <- function(location) {
+  data_sub <- dfAnion %>%
+    filter(Algae == "clean") %>% 
+    filter(LocAbbrev == location) %>%
+    select(all_of(anion_vars)) %>%
+    na.omit()
+
+  cor_matrix <- cor(data_sub, method = "spearman")
+  p_matrix <- cor.mtest(data_sub, method = "spearman")$p
+
+  cor_long <- reshape2::melt(cor_matrix)
+  p_long <- reshape2::melt(p_matrix)
+
+  merged <- merge(cor_long, p_long, by = c("Var1", "Var2"))
+  colnames(merged) <- c("Variable1", "Variable2", "Spearman_r", "p_value")
+  merged$Location <- location
+
+  return(merged)
+}
+
+# Apply across locations
+heatmap_data <- do.call(rbind, lapply(locations, get_corr_data))
+
+# Factor levels for correct ordering
+heatmap_data$Variable1 <- factor(heatmap_data$Variable1, levels = anion_vars)
+heatmap_data$Variable2 <- factor(heatmap_data$Variable2, levels = anion_vars)
+
+# Create label
+heatmap_data$label <- paste0(round(heatmap_data$Spearman_r, 2), "\n(p=", round(heatmap_data$p_value, 3), ")")
+heatmap_data$significant <- heatmap_data$p_value < 0.05
+
+# Remove upper triangle + diagonal if desired (optional)
+heatmap_data <- heatmap_data %>%
+  filter(as.numeric(Variable1) > as.numeric(Variable2))
+
+# Plot
+heatmapAnionClean <- ggplot(heatmap_data, aes(x = Variable1, y = Variable2, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = subset(heatmap_data, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  facet_wrap(~Location) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_blank()) 
+
+heatmapAnionClean
+
+ggsave(heatmapAnionClean, filename = "heatmapAnionClean.png", width = 11.5, height = 7, bg = "white")
+
+```
+
+## Red vs. Green
+```{r}
+cor.mtest <- function(mat, method = "spearman") {
+  mat <- as.matrix(mat)
+  n <- ncol(mat)
+  p.mat <- matrix(NA, n, n)
+  diag(p.mat) <- 0
+  for (i in 1:(n - 1)) {
+    for (j in (i + 1):n) {
+      tmp <- cor.test(mat[, i], mat[, j], method = method)
+      p.mat[i, j] <- p.mat[j, i] <- tmp$p.value
+    }
+  }
+  colnames(p.mat) <- rownames(p.mat) <- colnames(mat)
+  return(list(p = p.mat))
+}
+
+# Define pigment variables
+anion_vars <- c("Fo", "Cl", "NO2NO3", "PO43", "SO42")
+
+# Filter data once for Antarctic Peninsula red and green samples
+df_filtered <- dfAnion %>%
+  filter(Location == "Antarctic Peninsula",
+         Color %in% c("red", "green"))
+
+# Unique colors to iterate over
+colors <- unique(df_filtered$Color)
+
+# Function to calculate correlation matrices for each color group
+get_corr_data <- function(color_group) {
+  data_sub <- df_filtered %>%
+    filter(Color == color_group) %>%
+    select(all_of(anion_vars)) %>%
+    na.omit()
+  
+  cor_matrix <- cor(data_sub, method = "spearman")
+  p_matrix <- cor.mtest(data_sub, method = "spearman")$p
+  
+  cor_long <- reshape2::melt(cor_matrix)
+  p_long <- reshape2::melt(p_matrix)
+  
+  merged <- merge(cor_long, p_long, by = c("Var1", "Var2"))
+  colnames(merged) <- c("Variable1", "Variable2", "Spearman_r", "p_value")
+  merged$Color <- color_group
+  
+  return(merged)
+}
+
+# Get correlation data for each color
+heatmap_data_list <- lapply(colors, get_corr_data)
+heatmap_data <- do.call(rbind, heatmap_data_list)
+
+# Set factor levels for ordering
+heatmap_data$Variable1 <- factor(heatmap_data$Variable1, levels = anion_vars)
+heatmap_data$Variable2 <- factor(heatmap_data$Variable2, levels = anion_vars)
+
+# Create labels for plot
+heatmap_data$label <- paste0(round(heatmap_data$Spearman_r, 2), "\n(p=", round(heatmap_data$p_value, 3), ")")
+heatmap_data$significant <- heatmap_data$p_value < 0.05
+
+# Keep only lower triangle (optional)
+heatmap_data <- heatmap_data %>%
+  filter(as.numeric(Variable1) > as.numeric(Variable2))
+
+# Plot faceted by Color
+heatmapAnionAPRG <- ggplot(heatmap_data, aes(x = Variable1, y = Variable2, fill = Spearman_r)) +
+  geom_tile() +
+  geom_tile(data = subset(heatmap_data, significant), color = "black", linewidth = 0.75) +
+  geom_text(aes(label = label), size = 3) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  facet_wrap(~Color) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_blank())
+  
+heatmapAnionAPRG
+ggsave(heatmapAnionAPRG, filename = "heatmapAnionAPRG.png", width = 9, height = 5, bg = "white")
+```
+
+# Principal Components Analysis - Anions
+From the above plots, it seems as though pigment data are relatively linear. I am going to proceed with a PCA ordination over a nonparametric ordination, like nMDS. 
+
+## Standardize Data & Run PCA 
+Below, I use prcomp to standardize panion data and run a PCA. Even though the anion concentrations are on the same scale, some anions are present in much higher concentrations than others. Because of this, I will standardize anions so they are all on the same scale.
+
+PC1 explains 52.1% of the variance in pigment concentration. PC2 explains 20.49% of the variance in pigment concentration. Collectively, these two components explain 72.6% of the variance, and I will likely only include these two PCs in my analysis.
+```{r}
+Anions <- dfAnion[8:12]
+
+AnionPCA <- prcomp(Anions, scale = TRUE)
+
+summary(AnionPCA)
+```
+
+## Biplots
+```{r}
+biplot(AnionPCA)
+```
+
+## Ordination Plots {.tabset}
+
+```{r}
+## Add PC1 &2 to dataset
+dfAnion$PC1 <- AnionPCA$x[,1]
+dfAnion$PC2 <- AnionPCA$x[,2]
+```
+
+### By Location {.tabset}
+
+#### Original
+
+```{r}
+ordplotAnion <- dfAnion %>% 
+  ggplot(aes(x = PC1, y = PC2, color = Color, fill = Color)) + 
+  geom_point(size = 2.5, alpha = 0.7) + 
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  labs(x = "PC1 (52.1%)", 
+       y = "PC2 (20.5%)", 
+       fill = NULL,
+       color = NULL) + 
+  theme_minimal() + 
+  plot_theme
+
+ordplotAnion
+
+ggsave(ordplotAnion, filename = "ordplotAnion.png", width = 7, height = 7, bg = "white")
+```
+
+#####  Plot loadings
+```{r}
+# Extract loadings (rotation = variable loadings on PCs)
+loadings <- as.data.frame(AnionPCA$rotation[,1:2])
+
+# Rescale them a bit to fit on the plot (optional)
+loadings <- loadings * 5  # tweak multiplier as needed for arrow length
+loadings$Anion <- rownames(loadings)
+
+# Ordination with arrows
+ordplotAnion + 
+  geom_segment(data = loadings, aes(x = 0, y = 0, xend = PC1, yend = PC2),
+               arrow = arrow(length = unit(0.2, "cm")), 
+               color = "black",
+               inherit.aes = FALSE) +
+  geom_text_repel(data = loadings, aes(x = PC1, y = PC2, label = Anion),
+                  color = "black", size = 4,
+                  inherit.aes = FALSE,
+                  max.overlaps = Inf) 
+```
+
+
+#### Sized (PO43)
+
+```{r}
+ordplotAnionColor_PO43 <- dfAnion %>% 
+  ggplot(aes(x = PC1, y = PC2, size = PO43, color = Color, fill = Color)) + 
+  geom_point(alpha = 0.7) + 
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  scale_size_continuous(labels = label_comma()) +
+  labs(x = "PC1 (52.1%)", 
+       y = "PC2 (20.5%)",
+       size = "Phosphate (µM)",
+       fill = NULL,
+       color = NULL) + 
+  guides(size = guide_legend(order = 1),
+         color = guide_legend(order = 2),
+         fill = guide_legend(order = 2)) +
+  theme_minimal() + 
+  plot_theme +
+  theme(legend.position = "right")
+
+ordplotAnionColor_PO43
+
+ggsave(ordplotAnionColor_PO43, filename = "ordplotAnionColor_PO43.png", width = 7, height = 5, bg = "white")
+```
+
+# Publication Figures 
+
+## Stacked Bar Plot
+```{r}
+dfAnion_median <- dfAnion_long %>%
+  mutate(
+    Color = factor(Color, levels = c("clean", "red", "green")),
+    Anion = factor(Anion, levels = c("Cl", "PO43", "SO42", "NO2NO3", "Fo"))
+  ) %>%
+  group_by(Anion, Color) %>%
+  summarise(
+    MedianConc = median(Concentration, na.rm = TRUE),
+    .groups = "drop"
+  )
+```
+
+```{r}
+anion_labels <- c(
+  "Cl\u207B",              # Cl−
+  "PO\u2084\u00B3\u207B",   # PO4³−
+  "SO\u2084\u00B2\u207B",  # SO4²−
+  "NO\u2093\u207B",        # NO3−
+  "HCOO\u207B"           # Fo−
+  )
+```
+
+```{r}
+barplotAnionStacked <- ggplot(
+  dfAnion_median,
+  aes(x = Anion, y = MedianConc, fill = Color)
+) +
+  geom_bar(stat = "identity", width = 0.7) +
+  scale_x_discrete(labels = anion_labels) +
+  labs(
+    x = NULL,
+    y = expression(Concentration ~ "(µM)"),
+    fill = NULL
+  ) +
+  scale_fill_manual(values = colorPal) +   # your existing color palette
+  scale_y_continuous(
+    limits = c(0, 160),
+    breaks = seq(0, 160, by = 20),
+    expand = c(0, 0)) +
+  theme_minimal() +
+  plot_themePub +
+  theme(
+    axis.text.x = element_text(margin = margin(t = 10)),
+    legend.position = "bottom"
+  ) +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0),
+      keywidth = unit(0.75, "lines"),
+      keyheight = unit(0.75, "lines")
+    )
+  )
+
+barplotAnionStacked
+
+ggsave(
+  barplotAnionStacked,
+  filename = "barplotAnionStacked.png",
+  width = 6,
+  height = 5,
+  bg = "white"
+)
+```
+
+## Grouped Bar Plot
+
+```{r}
+dfAnion_median <- dfAnion_median %>%
+  mutate(
+    Color = factor(Color, levels = c("green", "red", "clean"))
+  )
+
+barplotAnionGrouped <- ggplot(
+  dfAnion_median,
+  aes(x = Anion, y = MedianConc, fill = Color)
+) +
+  geom_bar(
+    stat = "identity",
+    width = 0.65,
+    position = position_dodge(width = 0.7)
+  ) +
+  scale_x_discrete(labels = anion_labels) +
+  labs(
+    x = NULL,
+    y = expression(Concentration ~ "(µM)"),
+    fill = NULL
+  ) +
+  scale_fill_manual(values = colorPal) +
+  scale_y_continuous(
+    limits = c(0, 120),
+    breaks = seq(0, 120, by = 20),
+    expand = c(0, 0)) + 
+  theme_minimal() +
+  plot_themePub +
+  theme(
+    axis.text.x = element_text(margin = margin(t = 10)),
+    legend.position = "bottom"
+  ) +
+  guides(
+    fill = guide_legend(
+      override.aes = list(linetype = 0),
+      keywidth = unit(0.75, "lines"),
+      keyheight = unit(0.75, "lines")
+    )
+  )
+
+barplotAnionGrouped
+
+ggsave(
+  barplotAnionGrouped,
+  filename = "barplotAnionGrouped.png",
+  width = 6,
+  height = 6,
+  bg = "white"
+)
+```
+
+## Grouped Box Plot
+
+```{r}
+dfAnion_box <- dfAnion_long %>%
+  mutate(
+    Color = factor(Color, levels = c("green", "red", "clean")),
+    Anion = factor(Anion, levels = c("Cl", "PO43", "SO42", "NO2NO3", "Fo"))
+  )
+```
+
+```{r}
+boxplotAnionGrouped <- ggplot(
+  dfAnion_box,
+  aes(x = Anion, y = Concentration, color = Color, fill = Color)
+) +
+  geom_boxplot(
+    width = 0.6,
+    position = position_dodge(width = 0.7),
+    outlier.shape = 21,
+    outlier.size = 1.5, 
+    alpha = 0.85
+  ) +
+  scale_x_discrete(labels = anion_labels) +
+  labs(
+    x = NULL,
+    y = expression(Concentration ~ "(µM)"),
+    fill = NULL
+  ) +
+  scale_fill_manual(values = colorPal) +
+  scale_color_manual(values = colorPal) +
+  scale_y_sqrt(
+    breaks = c(0, 1, 4, 10, 50, 200, 800, 1200)
+  ) +
+  theme_minimal() +
+  plot_themePub +
+  theme(
+    axis.text.x = element_text(margin = margin(t = 10)),
+    legend.position = "bottom"
+  ) +
+  guides(
+  fill = guide_legend(
+    title = NULL,
+    override.aes = list(linetype = 0),
+    keywidth = unit(0.75, "lines"),
+    keyheight = unit(0.75, "lines")
+  ),
+  color = "none"
+)
+
+boxplotAnionGrouped
+
+ggsave(
+  boxplotAnionGrouped,
+  filename = "boxplotAnionGrouped.png",
+  width = 6,
+  height = 6,
+  bg = "white"
+)
+```
+
