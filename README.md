@@ -41,5 +41,11 @@ Key analytical components include:
 - Pigment normalization and ratio analysis
 
 ## Citation
-If using this repository or associated data, please cite the associated manuscript.
+If using this repository or associated data, please cite the associated manuscript. 
+
+The code in this repository is licensed under the MIT License.
+
+The data associated with this project are available under the Creative Commons Attribution 4.0 International (CC BY 4.0) license. This permits unrestricted use, distribution, and reproduction in any medium, provided appropriate credit is given to the original author(s).
+
+A permanent, citable version of the data and code is archived in Zenodo: [DOI to be added upon publication].
 
