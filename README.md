@@ -15,8 +15,6 @@ Analyses include:
 ## Repository Structure
 Each folder represents a self-contained analysis workflow: 
 
-Each folder represents a self-contained analysis workflow:
-
 - `01_CellDensity/` – Cell density calculations and visualization  
 - `02_PigmentConcentration/` – Bulk and normalized pigment concentrations  
 - `03_PigmentComposition/` – Pigment ratios and composition analysis  
