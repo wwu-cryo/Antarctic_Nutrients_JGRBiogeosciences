@@ -45,5 +45,5 @@ The code in this repository is licensed under the MIT License.
 
 The data associated with this project are available under the Creative Commons Attribution 4.0 International (CC BY 4.0) license. This permits unrestricted use, distribution, and reproduction in any medium, provided appropriate credit is given to the original author(s).
 
-A permanent, citable version of the data and code is archived in Zenodo: [(https://doi.org/10.5281/zenodo.19361707)].
+A permanent, citable version of the data and code is archived in Zenodo: [https://doi.org/10.5281/zenodo.19361707].
 
